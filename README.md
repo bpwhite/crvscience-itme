@@ -136,3 +136,12 @@ All mathematical expressions in the manuscript are typeset in plain-text ASCII n
 | `Omega_Gaia`, `E_planet` | Planetary Homeostasis Coupling | `{0.74 .. 1.36}`, `[0.22, 2.35]` | Couples guild `O2`, `CO2`, and `NP` nutrient recycling (`F_steward`, `s_gaia2`, `b_burn`) to planetary exergy budget `E_planet` and boundary transgression load `B_load` ([Richardson et al., 2023](https://pmc.ncbi.nlm.nih.gov/articles/PMC10499318/); [Wong & Bartlett, 2022](https://pmc.ncbi.nlm.nih.gov/articles/PMC9065981/)). |
 | `I_herit_total` | Multi-Channel Mutual Information | `[0.0, +inf)` bits | Sum of non-erased Shannon mutual information transmitted across genetic/organellar (`f_gen`, `S_raw`), cultural (`f_cult`, `B_cult`), archival (`f_arch`, `B_arch`), and formal theorem (`f_proof`, `B_proof`) channels. |
 
+## Citation & CRV Science Apps Hub
+
+- **CRV Science Apps Hub**: <https://crvscience.com/apps>
+- **Companion Preprint (`APP-PREPRINT-07`)**: [ITME: Continuous Four-Billion-Year Information-Theoretic Macroevolution and Planetary Biogeochemical Feedback Simulation](https://crvscience.com/apps/preprints/itme-planetary-biosphere-evolution)
+- **Concept DOI**: [`10.5281/zenodo.24222386`](https://doi.org/10.5281/zenodo.24222386)
+- **Source Repository**: <https://github.com/bpwhite/crvscience-itme>
+
+See [`CITATION.cff`](CITATION.cff) for machine-readable BibTeX/CFF metadata and [`validation/README.md`](validation/README.md) for the headless validation benchmark outputs (`cargo test --test headless_validation`).
+
