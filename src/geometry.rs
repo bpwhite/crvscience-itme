@@ -1,7 +1,7 @@
 //! 2D and 3D procedural geometry generation, 3D perspective camera projection,
 //! terminal ASCII/ANSI rendering, and standalone SVG structural stage atlas export (ITME v12.0 / `v1.2.0`).
 
-use crate::model::{AbiogenesisStage, AgricultureState, ChiralityCodeStage, CulturalState, EusocialState, ExosomaticState, GenomeSubstrateStage, MachineSynthesisState, MroClass, MulticellularState, PlanetaryState, TrophicGuild};
+use crate::model::{AbiogenesisStage, AgricultureState, ChiralityCodeStage, ExosomaticState, GenomeSubstrateStage, MachineSynthesisState, MroClass, MulticellularState, PlanetaryState, TrophicGuild};
 use crate::organisms::{ModeledUnit, OrganismKind};
 use crate::regimes::RegimeId;
 use std::f64::consts::{PI, TAU};

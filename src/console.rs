@@ -76,8 +76,7 @@ pub fn run_grand_trajectory_headless(opts: &ConsoleOptions) -> io::Result<()> {
             s.landmark_summary
         );
         csv_out.push_str(&format!(
-            "{},{:.3},{},{},{},{:.3},{:.3},{:.3},{:.1},{:.3},"{}"
-",
+            "{},{:.3},{},{},{},{:.3},{:.3},{:.3},{:.1},{:.3},\"{}\"\n",
             s.epoch.code(),
             s.geologic_age_ga,
             s.tick_end,

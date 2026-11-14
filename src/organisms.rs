@@ -140,6 +140,10 @@ impl OrganismKind {
         }
     }
 
+    pub fn alphabet_size(self) -> usize {
+        self.alphabet_symbols().len()
+    }
+
     pub fn alphabet_description(self) -> &'static str {
         match self {
             Self::RnaDnaProtein => {
@@ -1209,7 +1213,11 @@ impl ModeledUnit {
         if self.cultural_sequence.is_empty() {
             return 0.0;
         }
-        let raw = compute_effective_structure_bits(&self.cultural_sequence);
+        let raw = compute_raw_structure_bits(
+            &self.cultural_sequence,
+            self.kind.alphabet_size().max(8),
+            0,
+        );
         let health = (1.0 - 0.85 * self.cultural_drift_erosion).clamp(0.10, 1.0);
         (raw * (1.0 + 0.16 * (self.cultural_ratchet_tier as f64)) * health).max(0.0)
     }
@@ -1391,7 +1399,11 @@ impl ModeledUnit {
         if self.archive_sequence.is_empty() {
             return 0.0;
         }
-        let raw = compute_effective_structure_bits(&self.archive_sequence);
+        let raw = compute_raw_structure_bits(
+            &self.archive_sequence,
+            self.kind.alphabet_size().max(16),
+            0,
+        );
         let epistemic_purity = (1.0 - 0.90 * self.archive_false_discovery_load).clamp(0.05, 1.0);
         let inst_mult = match self.exosomatic_state {
             ExosomaticState::PeerVerifiedInstitution => 2.15,
@@ -1416,7 +1428,7 @@ impl ModeledUnit {
         if !self.cultural_state.is_cumulative_ratchet() {
             return (false, self.exosomatic_state);
         }
-        let alpha = self.kind.alphabet_size().max(16) as u16;
+        let alpha = self.kind.alphabet_size().max(64) as u16;
         let deme_seed = (self.deme_id as u16) * 7;
 
         match self.exosomatic_state {
@@ -1508,7 +1520,7 @@ impl ModeledUnit {
             && self.exosomatic_state == ExosomaticState::PeerVerifiedInstitution
             && self.archive_sequence.len() < 48
         {
-            let alpha = self.kind.alphabet_size().max(16) as u16;
+            let alpha = self.kind.alphabet_size().max(64) as u16;
             let next_sym = ((self.archive_sequence.len() as u16) * 13 + (self.deme_id as u16) * 5 + 3) % alpha;
             self.archive_sequence.push(next_sym);
         }
@@ -1526,7 +1538,11 @@ impl ModeledUnit {
         if self.computational_symbiont_sequence.is_empty() {
             return 0.0;
         }
-        let raw = compute_effective_structure_bits(&self.computational_symbiont_sequence);
+        let raw = compute_raw_structure_bits(
+            &self.computational_symbiont_sequence,
+            self.kind.alphabet_size().max(16),
+            0,
+        );
         let tail_health = self.distribution_tail_diversity.clamp(0.05, 1.0)
             * (1.0 - 0.90 * self.recursive_autophagy_load).clamp(0.05, 1.0);
         let mult = match self.machine_synthesis_state {
@@ -3452,7 +3468,7 @@ impl ModeledUnit {
         };
 
         let start_idx = usize::from(self.kind == OrganismKind::ArtificialIntelligence);
-        let mut end_idx = if self.kind == OrganismKind::ArtificialIntelligence {
+        let end_idx = if self.kind == OrganismKind::ArtificialIntelligence {
             child_seq.len().saturating_sub(1)
         } else {
             child_seq.len()
@@ -3488,7 +3504,7 @@ impl ModeledUnit {
         let mut assimilated = false;
         let biome_targets = self.kind.biome_target_symbols(child_biome, env_phase);
 
-        if controls.heritable_variation >= 0.01 || f_eff < 0.999 || recombined {
+        if controls.heritable_variation >= 0.01 || f_eff < 0.99 || recombined {
             let infid = (1.0 - f_eff).clamp(0.0, 0.65);
             let per_locus_mut =
                 (infid * 0.65 + controls.heritable_variation * 0.20).clamp(0.0, 0.65);
@@ -3555,12 +3571,13 @@ impl ModeledUnit {
                 }
             }
 
-            let del_bias =
-                if controls.cross_feeding_rate >= 0.10 || controls.trophic_coupling >= 0.10 {
-                    0.09
-                } else {
-                    0.03
-                };
+            let del_bias = if controls.heritable_variation < 0.01 && f_eff >= 0.99 {
+                0.0
+            } else if controls.cross_feeding_rate >= 0.10 || controls.trophic_coupling >= 0.10 {
+                0.09
+            } else {
+                0.03
+            };
             if child_seq.len() < 44 && rng.bernoulli(controls.heritable_variation * 0.16) {
                 let insert_pos = if self.kind == OrganismKind::ArtificialIntelligence {
                     end_idx.max(1)
@@ -3575,7 +3592,6 @@ impl ModeledUnit {
                     rng.gen_index(sigma as usize) as u16
                 };
                 child_seq.insert(insert_pos.min(child_seq.len()), new_sym);
-                end_idx += 1;
             } else if child_endo.is_empty()
                 && child_egt_loci == 0
                 && self.endo_tier == 0
@@ -3698,7 +3714,7 @@ impl ModeledUnit {
                 let mut c_seq = self.cultural_sequence.clone();
                 if controls.symbolic_teaching_fidelity < 0.78 && c_seq.len() > 4 {
                     c_seq.pop();
-                } else if let Some(p) = partner {
+                } else if let Some(p) = donor {
                     if controls.symbolic_teaching_fidelity >= 0.84
                         && controls.inter_deme_connectivity >= 0.12
                         && controls.inter_deme_connectivity <= 0.78
@@ -3725,7 +3741,7 @@ impl ModeledUnit {
             exosomatic_state: self.exosomatic_state,
             archive_sequence: {
                 let mut a_seq = self.archive_sequence.clone();
-                if let Some(p) = partner {
+                if let Some(p) = donor {
                     if self.exosomatic_state.has_written_archive()
                         && controls.peer_verification_rigor >= 0.60
                         && a_seq.len() < 48
@@ -4037,7 +4053,16 @@ impl ModeledUnit {
         }) + mro_maintenance_bits
             + multicell_coord_bits;
 
-        self.structure_raw_s = host_raw_s + endo_raw_s * 0.65 + nm_raw_s * 0.55;
+        let encephalization_s = if self.cultural_state.is_cultural()
+            || self.exosomatic_state.is_archival()
+            || self.machine_synthesis_state.has_computational_symbiont()
+        {
+            neural_brain_bits
+        } else {
+            0.0
+        };
+        self.structure_raw_s =
+            host_raw_s + endo_raw_s * 0.65 + nm_raw_s * 0.55 + encephalization_s;
 
         let rho_phys = self.physical_constraint_fraction(controls.bath_exergy_flux);
         self.structure_s = compute_effective_structure_bits(
@@ -4606,7 +4631,9 @@ impl ModeledUnit {
         }) * mro_streamline_synergy;
 
         let sublinear_scaffold = 4.25 * self.structure_s.powf(0.62);
+        let niche_scaffold = 1.0 + 0.22 * local_niche.clamp(0.0, 2.0);
         self.base_complexity_c = (sublinear_scaffold
+            * niche_scaffold
             * (0.38 + 1.45 * epistatic_score)
             * exergy_factor
             * engineered_bonus

@@ -104,7 +104,7 @@ impl SimulationWorld {
             mode,
             target_regime: initial_regime,
             classified_regime: initial_regime,
-            controls,
+            controls: controls.clone(),
             grid,
             phylogeny: PhylogenyTracker::new(),
             population: Vec::new(),
@@ -625,8 +625,17 @@ impl SimulationWorld {
             let old_id = u.id;
             u.seed_hadean_prebiotic_pool(&self.hadean_bath);
             let mut crossed_raf = false;
-            for _ in 0..5 {
-                self.hadean_bath.step_geochemical_cycle(&self.controls, u.raf_closure_score, 0.85);
+            for _ in 0..10 {
+                let ribo_f = if u.abiogenesis_stage.has_ribozyme_heredity() {
+                    1.0
+                } else {
+                    0.35
+                };
+                self.hadean_bath.step_geochemical_cycle(
+                    &self.controls,
+                    u.raf_closure_score,
+                    ribo_f,
+                );
                 let (st, _, _) = u.step_hadean_abiogenesis(&self.hadean_bath, &mut self.rng);
                 if st.has_raf_closure() && !crossed_raf {
                     crossed_raf = true;

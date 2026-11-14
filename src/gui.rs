@@ -1056,7 +1056,7 @@ impl ItmeGuiApp {
                     rect,
                     6.0,
                     egui::Color32::from_rgb(10, 14, 26),
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 52, 84)),
+                    egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(38, 52, 84)),
                 );
 
                 if w.history.len() < 2 {
@@ -1147,7 +1147,7 @@ impl ItmeGuiApp {
                 full_rect,
                 8.0,
                 egui::Color32::from_rgb(9, 13, 24),
-                egui::Stroke::new(1.2, egui::Color32::from_rgb(36, 52, 88)),
+                egui::Stroke::new(1.2_f32, egui::Color32::from_rgb(36, 52, 88)),
             );
 
             match self.viewport_layout {
@@ -1167,14 +1167,14 @@ impl ItmeGuiApp {
                         left_r,
                         6.0,
                         egui::Color32::from_rgb(11, 17, 30),
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(42, 60, 98)),
+                        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(42, 60, 98)),
                     );
                     paint_framed_box(
                         &painter,
                         right_r,
                         6.0,
                         egui::Color32::from_rgb(11, 17, 30),
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(42, 60, 98)),
+                        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(42, 60, 98)),
                     );
                     paint_spatial_grid(&painter, left_r.shrink(4.0), w, self.show_labels);
                     paint_phylogram_tree(&painter, right_r.shrink(4.0), w, self.show_labels);
@@ -1196,7 +1196,7 @@ impl ItmeGuiApp {
                         left_r,
                         6.0,
                         egui::Color32::from_rgb(11, 17, 30),
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(42, 60, 98)),
+                        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(42, 60, 98)),
                     );
                     paint_spatial_grid(&painter, left_r.shrink(4.0), w, self.show_labels);
                     paint_scene_3d(&painter, right_r, &scene, &self.camera, self.show_labels);
@@ -1237,7 +1237,7 @@ impl ItmeGuiApp {
                             sub,
                             6.0,
                             egui::Color32::from_rgb(11, 16, 30),
-                            egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 54, 90)),
+                            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(38, 54, 90)),
                         );
                         let scene = self.worlds[i].current_scene();
                         paint_scene_3d(
@@ -1314,7 +1314,7 @@ fn paint_phylogram_tree(
         let x = plot.left() + f * plot.width();
         painter.line_segment(
             [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
-            egui::Stroke::new(0.8, egui::Color32::from_rgba_unmultiplied(55, 76, 120, 80)),
+            egui::Stroke::new(0.8_f32, egui::Color32::from_rgba_unmultiplied(55, 76, 120, 80)),
         );
         let t_val =
             layout.min_step + (((layout.max_step - layout.min_step) as f32) * f).round() as usize;
@@ -1351,7 +1351,7 @@ fn paint_phylogram_tree(
         } else if br.child_guild == TrophicGuild::Holobiont {
             2.4
         } else {
-            1.9
+            1.9_f32
         };
 
         painter.line_segment([p_parent, p_corner], egui::Stroke::new(sw, col));
@@ -1363,28 +1363,28 @@ fn paint_phylogram_tree(
             painter.circle_stroke(
                 mid,
                 5.8,
-                egui::Stroke::new(1.8, egui::Color32::from_rgb(255, 209, 102)),
+                egui::Stroke::new(1.8_f32, egui::Color32::from_rgb(255, 209, 102)),
             );
         } else if br.is_mitosome_transition {
             painter.circle_filled(mid, 5.8, egui::Color32::from_rgb(255, 209, 102));
             painter.circle_stroke(
                 mid,
                 5.8,
-                egui::Stroke::new(1.8, egui::Color32::from_rgb(255, 92, 138)),
+                egui::Stroke::new(1.8_f32, egui::Color32::from_rgb(255, 92, 138)),
             );
         } else if br.is_mro_complete_loss {
             painter.circle_filled(mid, 5.6, egui::Color32::from_rgb(56, 189, 248));
             painter.circle_stroke(
                 mid,
                 5.6,
-                egui::Stroke::new(1.7, egui::Color32::from_rgb(255, 209, 102)),
+                egui::Stroke::new(1.7_f32, egui::Color32::from_rgb(255, 209, 102)),
             );
         } else if br.is_apicoplast_transition {
             painter.circle_filled(mid, 5.8, egui::Color32::from_rgb(255, 92, 138));
             painter.circle_stroke(
                 mid,
                 5.8,
-                egui::Stroke::new(1.8, egui::Color32::from_rgb(199, 125, 255)),
+                egui::Stroke::new(1.8_f32, egui::Color32::from_rgb(199, 125, 255)),
             );
         }
     }
@@ -1420,7 +1420,7 @@ fn paint_phylogram_tree(
                     + t * t * t * p2.y;
                 let next_p = egui::pos2(bx, by);
                 if s % 2 == 1 {
-                    painter.line_segment([prev, next_p], egui::Stroke::new(2.2, arc_col));
+                    painter.line_segment([prev, next_p], egui::Stroke::new(2.2_f32, arc_col));
                 }
                 prev = next_p;
             }
@@ -1568,7 +1568,7 @@ fn paint_spatial_grid(
                 painter.add(egui::Shape::convex_polygon(
                     pts,
                     fill,
-                    egui::Stroke::new(1.3, egui::Color32::from_rgb(80, 250, 170)),
+                    egui::Stroke::new(1.3_f32, egui::Color32::from_rgb(80, 250, 170)),
                 ));
             }
             TrophicGuild::Holobiont => {
@@ -1592,61 +1592,61 @@ fn paint_spatial_grid(
                     painter.circle_stroke(
                         center,
                         rad * 2.92,
-                        egui::Stroke::new(2.2, egui::Color32::from_rgb(34, 211, 238)),
+                        egui::Stroke::new(2.2_f32, egui::Color32::from_rgb(34, 211, 238)),
                     );
                 } else if unit.chirality_code_stage != ChiralityCodeStage::UniversalErrorMinimizedSgc {
                     painter.circle_stroke(
                         center,
                         rad * 2.75,
-                        egui::Stroke::new(2.2, egui::Color32::from_rgb(192, 132, 252)),
+                        egui::Stroke::new(2.2_f32, egui::Color32::from_rgb(192, 132, 252)),
                     );
                 } else if unit.abiogenesis_stage != AbiogenesisStage::LucaCellularLineage {
                     painter.circle_stroke(
                         center,
                         rad * 2.45,
-                        egui::Stroke::new(2.1, egui::Color32::from_rgb(251, 191, 36)),
+                        egui::Stroke::new(2.1_f32, egui::Color32::from_rgb(251, 191, 36)),
                     );
                 } else if unit.planetary_epoch == PlanetaryState::HomeostaticAwakening {
                     painter.circle_stroke(
                         center,
                         rad * 3.04,
-                        egui::Stroke::new(2.6, egui::Color32::from_rgb(52, 211, 153)),
+                        egui::Stroke::new(2.6_f32, egui::Color32::from_rgb(52, 211, 153)),
                     );
                 } else if unit.machine_synthesis_state == MachineSynthesisState::MachineVerifiedSymbiosis {
                     painter.circle_stroke(
                         center,
                         rad * 2.82,
-                        egui::Stroke::new(2.6, egui::Color32::from_rgb(139, 92, 246)),
+                        egui::Stroke::new(2.6_f32, egui::Color32::from_rgb(139, 92, 246)),
                     );
                 } else if unit.exosomatic_state == ExosomaticState::PeerVerifiedInstitution {
                     painter.circle_stroke(
                         center,
                         rad * 2.58,
-                        egui::Stroke::new(2.5, egui::Color32::from_rgb(20, 184, 166)),
+                        egui::Stroke::new(2.5_f32, egui::Color32::from_rgb(20, 184, 166)),
                     );
                 } else if unit.cultural_state == CulturalState::SymbolicCumulativeCulture {
                     painter.circle_stroke(
                         center,
                         rad * 2.34,
-                        egui::Stroke::new(2.4, egui::Color32::from_rgb(250, 204, 21)),
+                        egui::Stroke::new(2.4_f32, egui::Color32::from_rgb(250, 204, 21)),
                     );
                 } else if unit.agriculture_state == AgricultureState::LeafCutterAgroEcosystem {
                     painter.circle_stroke(
                         center,
                         rad * 2.12,
-                        egui::Stroke::new(2.4, egui::Color32::from_rgb(163, 230, 53)),
+                        egui::Stroke::new(2.4_f32, egui::Color32::from_rgb(163, 230, 53)),
                     );
                 } else if unit.eusocial_state == EusocialState::ObligateSuperorganism {
                     painter.circle_stroke(
                         center,
                         rad * 1.88,
-                        egui::Stroke::new(2.2, egui::Color32::from_rgb(245, 158, 11)),
+                        egui::Stroke::new(2.2_f32, egui::Color32::from_rgb(245, 158, 11)),
                     );
                 } else if unit.multicell_state == MulticellularState::GermSomaMulticellular {
                     painter.circle_stroke(
                         center,
                         rad * 1.62,
-                        egui::Stroke::new(1.8, egui::Color32::from_rgb(56, 189, 248)),
+                        egui::Stroke::new(1.8_f32, egui::Color32::from_rgb(56, 189, 248)),
                     );
                 }
                 if unit.mro_class != MroClass::Amiteukaryote {
@@ -1674,7 +1674,7 @@ fn paint_spatial_grid(
                 painter.add(egui::Shape::convex_polygon(
                     pts,
                     egui::Color32::from_rgb(255, 86, 122),
-                    egui::Stroke::new(1.5, rim),
+                    egui::Stroke::new(1.5_f32, rim),
                 ));
                 if unit.has_apicoplast() {
                     painter.circle_filled(
@@ -1721,7 +1721,7 @@ fn draw_series<F>(
         let yf = rect.bottom() - rect.height() * norm_y;
         let pt = egui::pos2(xf, yf);
         if let Some(p0) = prev {
-            painter.line_segment([p0, pt], egui::Stroke::new(1.6, color));
+            painter.line_segment([p0, pt], egui::Stroke::new(1.6_f32, color));
         }
         prev = Some(pt);
     }

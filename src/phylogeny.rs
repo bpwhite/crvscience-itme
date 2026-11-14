@@ -182,6 +182,7 @@ pub struct PhyloSummary {
     pub rnr_dna_transitions: usize,
     pub thymine_udg_transitions: usize,
     pub active_reticulations: usize,
+    pub horizontal_transfers: usize,
     pub egt_transfer_events: usize,
     pub egt_lockin_events: usize,
     pub nucleomorph_loss_events: usize,
@@ -417,6 +418,7 @@ pub struct PhylogenyTracker {
     pub sgc_crystallization_transitions: usize,
     pub rnr_dna_transitions: usize,
     pub thymine_udg_transitions: usize,
+    pub horizontal_transfers: usize,
     pub egt_transfer_events: usize,
     pub egt_lockin_events: usize,
     pub nucleomorph_loss_events: usize,
@@ -558,6 +560,7 @@ impl PhylogenyTracker {
             sgc_crystallization_transitions: 0,
             rnr_dna_transitions: 0,
             thymine_udg_transitions: 0,
+            horizontal_transfers: 0,
             egt_transfer_events: 0,
             egt_lockin_events: 0,
             nucleomorph_loss_events: 0,
@@ -607,6 +610,7 @@ impl PhylogenyTracker {
         self.sgc_crystallization_transitions = 0;
         self.rnr_dna_transitions = 0;
         self.thymine_udg_transitions = 0;
+        self.horizontal_transfers = 0;
         self.egt_transfer_events = 0;
         self.egt_lockin_events = 0;
         self.nucleomorph_loss_events = 0;
@@ -2818,6 +2822,7 @@ impl PhylogenyTracker {
             }
         }
         if let Some(did) = valid_donor {
+            self.horizontal_transfers += 1;
             if let Some(d_node) = self.nodes.get_mut(&did) {
                 if !d_node.symbio_children.contains(&child_id) {
                     d_node.symbio_children.push(child_id);
@@ -4283,6 +4288,7 @@ impl PhylogenyTracker {
             rnr_dna_transitions: self.rnr_dna_transitions,
             thymine_udg_transitions: self.thymine_udg_transitions,
             active_reticulations,
+            horizontal_transfers: self.horizontal_transfers,
             egt_transfer_events: self.egt_transfer_events,
             egt_lockin_events: self.egt_lockin_events,
             nucleomorph_loss_events: self.nucleomorph_loss_events,
@@ -5555,99 +5561,112 @@ impl PhylogenyTracker {
                     r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#bae6fd" font-family="monospace" font-size="9.5">Holo→Clonal</text>"##,
                     y2 - 8.5
                 );
-            } else if br.is_hydrogenosome_transition {
-                let _ = writeln!(
-                    svg,
-                    r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.4" fill="#06d6a0" stroke="#ffd166" stroke-width="2.0"/>"##
-                );
-                let _ = writeln!(
-                    svg,
-                    r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#a7f3d0" font-family="monospace" font-size="9.5">Mito→Hydro</text>"##,
-                    y2 - 8.5
-                );
-            } else if br.is_mitosome_transition {
-                let _ = writeln!(
-                    svg,
-                    r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.4" fill="#ffd166" stroke="#ff5c8a" stroke-width="2.0"/>"##
-                );
-                let _ = writeln!(
-                    svg,
-                    r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#fde68a" font-family="monospace" font-size="9.5">Hydro→MitoS</text>"##,
-                    y2 - 8.5
-                );
-            } else if br.is_mro_complete_loss {
-                let _ = writeln!(
-                    svg,
-                    r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.2" fill="#38bdf8" stroke="#ffd166" stroke-width="2.0"/>"##
-                );
-                let _ = writeln!(
-                    svg,
-                    r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#bae6fd" font-family="monospace" font-size="9.5">MRO→0</text>"##,
-                    y2 - 8.5
-                );
-            } else if br.is_apicoplast_transition {
-                let _ = writeln!(
-                    svg,
-                    r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.4" fill="#ff5c8a" stroke="#c77dff" stroke-width="2.1"/>"##
-                );
-                let _ = writeln!(
-                    svg,
-                    r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#f3c4fb" font-family="monospace" font-size="9.5">Holo→Apico</text>"##,
-                    y2 - 8.5
-                );
-            } else if br.is_apicoplast_complete_loss {
-                let _ = writeln!(
-                    svg,
-                    r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.2" fill="#00f5d4" stroke="#ffd166" stroke-width="2.0"/>"##
-                );
-                let _ = writeln!(
-                    svg,
-                    r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#9bf6ff" font-family="monospace" font-size="9.5">Apico→0</text>"##,
-                    y2 - 8.5
-                );
-            } else if br.is_klepto_tipping_point {
-                let _ = writeln!(
-                    svg,
-                    r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.4" fill="#80ed99" stroke="#00f5d4" stroke-width="2.0"/>"##
-                );
-                let _ = writeln!(
-                    svg,
-                    r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#b7efc5" font-family="monospace" font-size="9.5">KP→FIX</text>"##,
-                    y2 - 8.5
-                );
-            } else if br.is_nucleomorph_loss {
-                let _ = writeln!(
-                    svg,
-                    r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.2" fill="#ffd166" stroke="#f72585" stroke-width="1.9"/>"##
-                );
-                let _ = writeln!(
-                    svg,
-                    r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#ffe66d" font-family="monospace" font-size="9.5">NM→0</text>"##,
-                    y2 - 8.5
-                );
-            } else if br.is_egt_lockin {
-                let _ = writeln!(
-                    svg,
-                    r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="5.8" fill="#00f5d4" stroke="#c77dff" stroke-width="1.8"/>"##
-                );
-                let _ = writeln!(
-                    svg,
-                    r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#80ffdb" font-family="monospace" font-size="9.5">EGT→Nuc</text>"##,
-                    y2 - 8.5
-                );
-            } else if let Some((from_g, to_g)) = br.guild_transition {
-                let badge_col = guild_hex(to_g);
-                let _ = writeln!(
-                    svg,
-                    r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="5.2" fill="{badge_col}" stroke="#ffffff" stroke-width="1.3"/>"##
-                );
-                let _ = writeln!(
-                    svg,
-                    r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#e6eeff" font-family="monospace" font-size="9.5">{}→{}</text>"##,
-                    y2 - 8.0,
-                    from_g.short_code(),
-                    to_g.short_code()
-                );
+            } else {
+                let mut has_mro_badge = false;
+                if br.is_hydrogenosome_transition {
+                    has_mro_badge = true;
+                    let _ = writeln!(
+                        svg,
+                        r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.4" fill="#06d6a0" stroke="#ffd166" stroke-width="2.0"/>"##
+                    );
+                    let _ = writeln!(
+                        svg,
+                        r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#a7f3d0" font-family="monospace" font-size="9.5">Mito→Hydro</text>"##,
+                        y2 - 8.5
+                    );
+                } else if br.is_mitosome_transition {
+                    has_mro_badge = true;
+                    let _ = writeln!(
+                        svg,
+                        r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.4" fill="#ffd166" stroke="#ff5c8a" stroke-width="2.0"/>"##
+                    );
+                    let _ = writeln!(
+                        svg,
+                        r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#fde68a" font-family="monospace" font-size="9.5">Hydro→MitoS</text>"##,
+                        y2 - 8.5
+                    );
+                } else if br.is_mro_complete_loss {
+                    has_mro_badge = true;
+                    let _ = writeln!(
+                        svg,
+                        r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.2" fill="#38bdf8" stroke="#ffd166" stroke-width="2.0"/>"##
+                    );
+                    let _ = writeln!(
+                        svg,
+                        r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#bae6fd" font-family="monospace" font-size="9.5">MRO→0</text>"##,
+                        y2 - 8.5
+                    );
+                }
+
+                let has_apico_badge =
+                    br.is_apicoplast_transition || br.is_apicoplast_complete_loss;
+                let apico_y = if has_mro_badge { y2 + 12.5 } else { y2 - 8.5 };
+                if br.is_apicoplast_transition {
+                    let _ = writeln!(
+                        svg,
+                        r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.4" fill="#ff5c8a" stroke="#c77dff" stroke-width="2.1"/>"##
+                    );
+                    let _ = writeln!(
+                        svg,
+                        r##"<text x="{mx:.1}" y="{apico_y:.1}" text-anchor="middle" fill="#f3c4fb" font-family="monospace" font-size="9.5">Holo→Apico</text>"##
+                    );
+                } else if br.is_apicoplast_complete_loss {
+                    let _ = writeln!(
+                        svg,
+                        r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.2" fill="#00f5d4" stroke="#ffd166" stroke-width="2.0"/>"##
+                    );
+                    let _ = writeln!(
+                        svg,
+                        r##"<text x="{mx:.1}" y="{apico_y:.1}" text-anchor="middle" fill="#9bf6ff" font-family="monospace" font-size="9.5">Apico→0</text>"##
+                    );
+                }
+
+                if !has_mro_badge && !has_apico_badge {
+                    if br.is_klepto_tipping_point {
+                        let _ = writeln!(
+                            svg,
+                            r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.4" fill="#80ed99" stroke="#00f5d4" stroke-width="2.0"/>"##
+                        );
+                        let _ = writeln!(
+                            svg,
+                            r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#b7efc5" font-family="monospace" font-size="9.5">KP→FIX</text>"##,
+                            y2 - 8.5
+                        );
+                    } else if br.is_nucleomorph_loss {
+                        let _ = writeln!(
+                            svg,
+                            r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="6.2" fill="#ffd166" stroke="#f72585" stroke-width="1.9"/>"##
+                        );
+                        let _ = writeln!(
+                            svg,
+                            r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#ffe66d" font-family="monospace" font-size="9.5">NM→0</text>"##,
+                            y2 - 8.5
+                        );
+                    } else if br.is_egt_lockin {
+                        let _ = writeln!(
+                            svg,
+                            r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="5.8" fill="#00f5d4" stroke="#c77dff" stroke-width="1.8"/>"##
+                        );
+                        let _ = writeln!(
+                            svg,
+                            r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#80ffdb" font-family="monospace" font-size="9.5">EGT→Nuc</text>"##,
+                            y2 - 8.5
+                        );
+                    } else if let Some((from_g, to_g)) = br.guild_transition {
+                        let badge_col = guild_hex(to_g);
+                        let _ = writeln!(
+                            svg,
+                            r##"<circle cx="{mx:.1}" cy="{y2:.1}" r="5.2" fill="{badge_col}" stroke="#ffffff" stroke-width="1.3"/>"##
+                        );
+                        let _ = writeln!(
+                            svg,
+                            r##"<text x="{mx:.1}" y="{:.1}" text-anchor="middle" fill="#e6eeff" font-family="monospace" font-size="9.5">{}→{}</text>"##,
+                            y2 - 8.0,
+                            from_g.short_code(),
+                            to_g.short_code()
+                        );
+                    }
+                }
             }
         }
 

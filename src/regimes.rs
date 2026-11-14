@@ -510,7 +510,7 @@ pub fn classify_emergent_state(
     let has_rep = exergy_driven && empirical_birth_activity >= 0.04;
     let has_var = has_rep
         && ((1.0 - adami_rho) > 0.025
-            || price.selection_covariance.abs() > 0.002
+            || (price.selection_covariance.abs() > 0.002 && (1.0 - adami_rho) > 0.004)
             || assimilation_activity > 0.05);
     let above_eigen = has_rep && blended_fidelity >= critical_theta_f;
     let has_soft = has_rep && m_c == 2 && assimilation_activity >= 0.08 && above_eigen;

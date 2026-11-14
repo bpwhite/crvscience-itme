@@ -2331,14 +2331,16 @@ fn cumulative_cultural_evolution_requires_teaching_fidelity_peaks_under_partial_
         "Partially connected structured demes must outperform both over-connected conformist and isolated demes!"
     );
 
-    let child = deme0.replicate_with_partner(
+    let (child, _, _, _) = deme0.replicate_with_partner(
         Some(&deme2),
         120,
-        &ctrl,
+        deme0.grid_x,
+        deme0.grid_y,
+        BiomeZone::Alpha,
         1.20,
         0.38,
         0.48,
-        BiomeZone::Alpha,
+        &ctrl,
         0.93,
         24,
         0.4,
