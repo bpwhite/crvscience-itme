@@ -13,12 +13,11 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://gnu.org>.
 
-//! Native desktop GUI mode built with `eframe` / `egui` (`0.29`) — ITME v12.0 (`v1.2.0`).
+//! Native desktop GUI mode built with `eframe` / `egui` (`0.29`) — ITME v23.0.
 //!
-//! Features live real-time **Anaerobic Mitochondrial Reduction (`Mito->Hydro->MitoS->MRO->0`) + Apicoplasts + Kleptoplasty**:
-//! - `MRO Reduce!`, `Apico Reduce!`, `Klepto Steal!`, `Symbio 1°!`, `Serial 2°/3°!`, `EGT Step!`, and `NM Reduce!` controls,
-//! - `O2_level (Hypoxia)`, `mu_mro (Anaerobic MRO Reduction)`, and `suf_rescue (Bacterial Cytosolic SUF)` sliders,
-//! - Teal-gold `Hydrogenosome`s, gold-rimmed `ISC` `Mitosome`s, and cyan `SUF` `Amiteukaryote`s on the 2D grid & phylogram!
+//! Starts at an isolated 3-Domain Main Menu launcher (`RNA/DNA/Protein`, `Hominid Populations`,
+//! and `Artificial Intelligences`), where launching any substrate opens a single dedicated
+//! `SimulationWorld` with domain-specific regime titles, grouped sliders, and telemetry.
 
 use crate::engine::{SimulationMode, SimulationWorld};
 use crate::geometry::{Camera3D, StructureScene};
@@ -51,13 +50,39 @@ enum ViewportLayout {
     PhylogenyFull,
     Perspective3D,
     Blueprint2D,
-    TriOrganism3D,
     GrandTrajectory,
 }
 
-pub struct ItmeGuiApp {
-    worlds: [SimulationWorld; 3],
-    active_org_idx: usize,
+struct MainMenuState {
+    mode: SimulationMode,
+    steps_per_stage: usize,
+    initial_regime: RegimeId,
+    seed_text: String,
+    seed: u64,
+}
+
+impl MainMenuState {
+    fn new(seed: u64) -> Self {
+        Self {
+            mode: SimulationMode::GuidedCurriculum,
+            steps_per_stage: 32,
+            initial_regime: RegimeId::R00Static,
+            seed_text: seed.to_string(),
+            seed,
+        }
+    }
+
+    fn parsed_seed(&self) -> u64 {
+        self.seed_text
+            .trim()
+            .parse::<u64>()
+            .unwrap_or(self.seed)
+    }
+}
+
+struct DomainSession {
+    organism: OrganismKind,
+    world: SimulationWorld,
     viewport_layout: ViewportLayout,
     camera: Camera3D,
     auto_rotate: bool,
@@ -67,6 +92,17 @@ pub struct ItmeGuiApp {
     last_step_instant: Instant,
     export_status: Option<String>,
     grand_epochs: Vec<GrandTrajectoryEpochSummary>,
+    wants_main_menu: bool,
+}
+
+enum AppScreen {
+    MainMenu(MainMenuState),
+    Simulation(Box<DomainSession>),
+}
+
+pub struct ItmeGuiApp {
+    screen: AppScreen,
+    default_seed: u64,
 }
 
 impl ItmeGuiApp {
@@ -78,35 +114,297 @@ impl ItmeGuiApp {
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = egui::Color32::from_rgb(13, 18, 32);
         visuals.window_fill = egui::Color32::from_rgb(16, 22, 38);
+        visuals.extreme_bg_color = egui::Color32::from_rgb(9, 13, 24);
         ctx.set_visuals(visuals);
 
-        let worlds = [
-            SimulationWorld::new(
-                OrganismKind::RnaDnaProtein,
-                RegimeId::R00Static,
-                SimulationMode::GuidedCurriculum,
-                32,
-                seed,
+        Self {
+            screen: AppScreen::MainMenu(MainMenuState::new(seed)),
+            default_seed: seed,
+        }
+    }
+
+    fn draw_panels(&mut self, ctx: &egui::Context) {
+        let mut next_screen: Option<AppScreen> = None;
+        match &mut self.screen {
+            AppScreen::MainMenu(menu) => {
+                if let Some(session) = Self::draw_main_menu(ctx, menu) {
+                    next_screen = Some(AppScreen::Simulation(Box::new(session)));
+                }
+            }
+            AppScreen::Simulation(session) => {
+                session.draw_panels(ctx);
+                if session.wants_main_menu {
+                    let seed = self.default_seed;
+                    next_screen = Some(AppScreen::MainMenu(MainMenuState::new(seed)));
+                }
+            }
+        }
+        if let Some(scr) = next_screen {
+            self.screen = scr;
+        }
+    }
+
+    fn domain_card_meta(org: OrganismKind) -> (&'static str, &'static str, egui::Color32, &'static [&'static str], &'static str) {
+        match org {
+            OrganismKind::RnaDnaProtein => (
+                "Domain 1 • Molecular Evolution",
+                "Abiogenesis, Coding, & Organelle Symbiogenesis",
+                egui::Color32::from_rgb(56, 189, 248),
+                &[
+                    "Hadean FeNiS delta-pH & wet-dry protocell closure",
+                    "Fe3O4 CISS homochiral D-RNA / L-AA & SGC emergence",
+                    "Class III RNR RNA -> T-DNA + UDG repair virosphere",
+                    "1°/2°/3° endosymbiosis, Hydrogenosomes, Mitosomes (ISC), MRO->0",
+                    "Clonal multicellularity, germ-soma sequestration & apoptosis",
+                ],
+                "Simulates prebiotic chemistry, Eigen's fidelity cliff, endosymbiont gene transfer, and reductive organelle trajectories.",
             ),
-            SimulationWorld::new(
-                OrganismKind::HominidPopulation,
-                RegimeId::R00Static,
-                SimulationMode::GuidedCurriculum,
-                32,
-                seed + 101,
+            OrganismKind::HominidPopulation => (
+                "Domain 2 • Hominid Populations",
+                "Biocultural Niche Construction, Pedagogy, & Written Archives",
+                egui::Color32::from_rgb(251, 191, 36),
+                &[
+                    "Base-camp hearth provisioning & foraging band fissioning",
+                    "Inter-band seasonal watershed & lithic guild competition",
+                    "Cumulative symbolic teaching & cross-deme recombination",
+                    "Agro-ectosymbiosis, cultivar domestication & blight shields",
+                    "External written archives & peer-verified replication audits",
+                ],
+                "Simulates kin-structured bands, behavioral plasticity, cumulative cultural ratchets, subsistence mutualisms, and archival institutions.",
             ),
-            SimulationWorld::new(
-                OrganismKind::ArtificialIntelligence,
-                RegimeId::R00Static,
-                SimulationMode::GuidedCurriculum,
-                32,
-                seed + 202,
+            OrganismKind::ArtificialIntelligence => (
+                "Domain 3 • Artificial Intelligences",
+                "Compute Allocation, Recursive Distillation, & Proof Verifiers",
+                egui::Color32::from_rgb(167, 139, 250),
+                &[
+                    "Cluster load-balancing & stateless container checkpoint forking",
+                    "Shared-KV / compute-quota contention & online test-time RL",
+                    "Adversarial population training (PBT) & teacher distillation",
+                    "Composable tool enclaves & deterministic verifier loops",
+                    "Formal proof-verifier strictness & anti-collapse empiric guard",
+                ],
+                "Simulates accelerator compute budgets, synthetic tail-diversity decay (Shumailov cliff), teacher distillation, and formal verifiers.",
             ),
-        ];
+        }
+    }
+
+    fn draw_main_menu(ctx: &egui::Context, menu: &mut MainMenuState) -> Option<DomainSession> {
+        let mut launched: Option<DomainSession> = None;
+
+        egui::TopBottomPanel::top("itme_menu_top").show(ctx, |ui| {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.heading(
+                    egui::RichText::new("ITME v23.0 — Information-Theoretic & Thermodynamic Evolutionary Simulator")
+                        .size(20.0)
+                        .strong()
+                        .color(egui::Color32::from_rgb(130, 245, 205)),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new("CRV Science Network • GPL-3.0")
+                            .small()
+                            .color(egui::Color32::from_rgb(148, 163, 184)),
+                    );
+                });
+            });
+            ui.label(
+                egui::RichText::new(
+                    "Select an isolated evolutionary substrate below. Each organism launches a separate single-domain SimulationWorld with its own regime sequence, physical controls, and telemetry.",
+                )
+                .color(egui::Color32::from_rgb(186, 198, 218)),
+            );
+            ui.add_space(6.0);
+        });
+
+        egui::TopBottomPanel::bottom("itme_menu_footer").show(ctx, |ui| {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.strong("Session Launch Options:");
+                ui.separator();
+                ui.label("Mode:");
+                ui.selectable_value(&mut menu.mode, SimulationMode::GuidedCurriculum, "13-Regime Guided Tour");
+                ui.selectable_value(&mut menu.mode, SimulationMode::OrganicSandbox, "Autonomous Sandbox");
+                ui.separator();
+                ui.label("Initial Regime:");
+                ui.selectable_value(&mut menu.initial_regime, RegimeId::R00Static, "R(0.0) Basal");
+                ui.selectable_value(&mut menu.initial_regime, RegimeId::R30FullyDarwinian, "R(3.0) Darwinian");
+                ui.selectable_value(&mut menu.initial_regime, RegimeId::R30SoftInheritance, "R(3.0) Soft/Distill");
+                ui.selectable_value(&mut menu.initial_regime, RegimeId::R35Symbiogenetic, "R(3.5) Integrated");
+                ui.separator();
+                ui.label("Seed:");
+                ui.add(egui::TextEdit::singleline(&mut menu.seed_text).desired_width(90.0));
+                if menu.mode == SimulationMode::GuidedCurriculum {
+                    ui.separator();
+                    ui.add(egui::Slider::new(&mut menu.steps_per_stage, 12..=80).text("Ticks/Regime"));
+                }
+            });
+            ui.add_space(4.0);
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.add_space(10.0);
+            ui.columns(3, |cols| {
+                for (idx, &org) in OrganismKind::ALL.iter().enumerate() {
+                    let (badge, subtitle, accent, highlights, dynamics_note) = Self::domain_card_meta(org);
+                    let col_ui = &mut cols[idx];
+                    let inner_w = (col_ui.available_width() - 36.0).max(220.0);
+                    egui::Frame::none()
+                        .fill(egui::Color32::from_rgb(19, 27, 46))
+                        .stroke(egui::Stroke::new(1.5_f32, accent))
+                        .rounding(10.0)
+                        .inner_margin(egui::Margin::same(16.0))
+                        .show(col_ui, |card| {
+                            card.set_min_width(inner_w);
+                            card.set_max_width(inner_w);
+                            card.set_min_height(460.0);
+
+                            card.label(
+                                egui::RichText::new(badge)
+                                    .small()
+                                    .strong()
+                                    .color(accent),
+                            );
+                            card.add_space(2.0);
+                            card.heading(
+                                egui::RichText::new(org.title())
+                                    .size(18.0)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(241, 245, 249)),
+                            );
+                            card.add(
+                                egui::Label::new(
+                                    egui::RichText::new(subtitle)
+                                        .small()
+                                        .italics()
+                                        .color(egui::Color32::from_rgb(148, 163, 184)),
+                                )
+                                .wrap(),
+                            );
+                            card.add_space(8.0);
+                            card.separator();
+                            card.add_space(6.0);
+
+                            card.strong(egui::RichText::new("Symbol Alphabet").color(accent));
+                            card.add(
+                                egui::Label::new(
+                                    egui::RichText::new(org.alphabet_description())
+                                        .small()
+                                        .monospace()
+                                        .color(egui::Color32::from_rgb(203, 213, 225)),
+                                )
+                                .wrap(),
+                            );
+                            card.add_space(8.0);
+
+                            card.strong(egui::RichText::new("Domain Regimes & Phenomena").color(accent));
+                            for h in highlights {
+                                card.horizontal(|row| {
+                                    row.label(egui::RichText::new("•").strong().color(accent));
+                                    row.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(*h)
+                                                .small()
+                                                .color(egui::Color32::from_rgb(215, 224, 238)),
+                                        )
+                                        .wrap(),
+                                    );
+                                });
+                            }
+
+                            card.add_space(8.0);
+                            card.strong(egui::RichText::new("Independent Dynamics").color(accent));
+                            card.add(
+                                egui::Label::new(
+                                    egui::RichText::new(dynamics_note)
+                                        .small()
+                                        .color(egui::Color32::from_rgb(162, 178, 204)),
+                                )
+                                .wrap(),
+                            );
+
+                            card.add_space(14.0);
+                            card.strong(
+                                egui::RichText::new(format!(
+                                    "Preview Regime {}: {}",
+                                    menu.initial_regime.code(),
+                                    menu.initial_regime.domain_name(org)
+                                ))
+                                .small()
+                                .color(egui::Color32::from_rgb(226, 232, 240)),
+                            );
+                            card.add_space(8.0);
+
+                            let launch_btn = egui::Button::new(
+                                egui::RichText::new(format!("Launch {} Simulation ->", org.short_title()))
+                                    .size(14.0)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(10, 15, 28)),
+                            )
+                            .fill(accent);
+                            if card.add_sized([inner_w, 34.0], launch_btn).clicked() {
+                                let seed = menu.parsed_seed();
+                                launched = Some(DomainSession::new(
+                                    org,
+                                    menu.initial_regime,
+                                    menu.mode,
+                                    menu.steps_per_stage,
+                                    seed,
+                                ));
+                            }
+                        });
+                }
+            });
+        });
+
+        launched
+    }
+}
+
+impl App for ItmeGuiApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let AppScreen::Simulation(session) = &mut self.screen {
+            if !session.paused {
+                let interval = Duration::from_secs_f32((1.0 / session.steps_per_second).max(0.015));
+                if session.last_step_instant.elapsed() >= interval {
+                    session.step_once();
+                    session.last_step_instant = Instant::now();
+                }
+                if session.auto_rotate {
+                    session.camera.yaw += 0.008;
+                }
+                ctx.request_repaint_after(Duration::from_millis(16));
+            } else if session.auto_rotate {
+                session.camera.yaw += 0.006;
+                ctx.request_repaint_after(Duration::from_millis(16));
+            }
+        }
+
+        self.draw_panels(ctx);
+    }
+}
+
+impl DomainSession {
+    fn new(
+        organism: OrganismKind,
+        initial_regime: RegimeId,
+        mode: SimulationMode,
+        steps_per_stage: usize,
+        seed: u64,
+    ) -> Self {
+        let mut world = SimulationWorld::new(
+            organism,
+            initial_regime,
+            mode,
+            steps_per_stage,
+            seed,
+        );
+        world.controls = initial_regime.domain_preset_controls(organism);
+        world.step();
 
         Self {
-            worlds,
-            active_org_idx: 0,
+            organism,
+            world,
             viewport_layout: ViewportLayout::SpatialAndPhylogeny,
             camera: Camera3D::default(),
             auto_rotate: true,
@@ -116,79 +414,38 @@ impl ItmeGuiApp {
             last_step_instant: Instant::now(),
             export_status: None,
             grand_epochs: Vec::new(),
+            wants_main_menu: false,
         }
     }
 
-    fn active_world(&self) -> &SimulationWorld {
-        &self.worlds[self.active_org_idx]
-    }
-
-    fn active_world_mut(&mut self) -> &mut SimulationWorld {
-        &mut self.worlds[self.active_org_idx]
-    }
-
-    fn step_all_worlds(&mut self) {
-        for w in &mut self.worlds {
-            w.step();
+    fn step_once(&mut self) {
+        let prev_reg = self.world.target_regime;
+        self.world.step();
+        if self.world.mode == SimulationMode::GuidedCurriculum && self.world.target_regime != prev_reg {
+            self.world.controls = self.world.target_regime.domain_preset_controls(self.organism);
         }
     }
 
-    fn jump_all_or_active_to_regime(&mut self, regime: RegimeId) {
-        if self.viewport_layout == ViewportLayout::TriOrganism3D {
-            for w in &mut self.worlds {
-                let preserve = regime.index() >= 2;
-                w.apply_regime_preset(regime, preserve);
-                w.step();
-            }
-        } else {
-            let preserve = regime.index() >= 2;
-            let w = self.active_world_mut();
-            w.apply_regime_preset(regime, preserve);
-            w.step();
-        }
+    fn jump_to_regime(&mut self, regime: RegimeId) {
+        let preserve = regime.index() >= 2;
+        self.world.apply_regime_preset(regime, preserve);
+        self.world.controls = regime.domain_preset_controls(self.organism);
+        self.world.step();
     }
 
     fn export_snapshot_files(&mut self) {
-        let w = self.active_world();
-        let slug = w.organism.slug();
-        let step = w.step_count;
+        let slug = self.organism.slug();
+        let step = self.world.step_count;
         let nhx_file = format!("itme_{slug}_step{step}.nhx");
         let svg_file = format!("itme_{slug}_step{step}_phylogram.svg");
-        let nhx_res = fs::write(&nhx_file, w.export_newick(true));
-        let svg_res = fs::write(&svg_file, w.export_phylogram_svg());
+        let nhx_res = fs::write(&nhx_file, self.world.export_newick(true));
+        let svg_res = fs::write(&svg_file, self.world.export_phylogram_svg());
         self.export_status = Some(match (nhx_res, svg_res) {
             (Ok(()), Ok(())) => format!("Saved {nhx_file} & {svg_file}"),
             (Err(e), _) | (_, Err(e)) => format!("Export error: {e}"),
         });
     }
-}
 
-impl App for ItmeGuiApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if !self.paused {
-            let interval = Duration::from_secs_f32((1.0 / self.steps_per_second).max(0.015));
-            if self.last_step_instant.elapsed() >= interval {
-                if self.viewport_layout == ViewportLayout::TriOrganism3D {
-                    self.step_all_worlds();
-                } else {
-                    self.active_world_mut().step();
-                }
-                self.last_step_instant = Instant::now();
-            }
-            if self.auto_rotate {
-                self.camera.yaw += 0.008;
-            }
-            ctx.request_repaint_after(Duration::from_millis(16));
-        } else if self.auto_rotate {
-            self.camera.yaw += 0.006;
-            ctx.request_repaint_after(Duration::from_millis(16));
-        }
-
-        self.draw_panels(ctx);
-    }
-}
-
-impl ItmeGuiApp {
     fn draw_panels(&mut self, ctx: &egui::Context) {
         self.draw_top_toolbar(ctx);
         self.draw_left_controls(ctx);
@@ -196,16 +453,24 @@ impl ItmeGuiApp {
         self.draw_bottom_telemetry_plots(ctx);
         self.draw_central_viewport(ctx);
     }
+
     fn draw_top_toolbar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("itme_top_bar").show(ctx, |ui| {
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
-                ui.heading(
-                    egui::RichText::new(
-                        "ITME v23.0 — Continuous 4.25 Ga Grand Trajectory (Homochirality -> SGC -> T-DNA -> LUCA -> LECA -> Archives -> Gaia-2.0)",
-                    )
-                    .color(egui::Color32::from_rgb(130, 245, 205))
-                    .strong(),
+                if ui
+                    .button(egui::RichText::new("<- Main Menu").strong())
+                    .clicked()
+                {
+                    self.wants_main_menu = true;
+                }
+                ui.separator();
+
+                let (_, _, accent, _, _) = ItmeGuiApp::domain_card_meta(self.organism);
+                ui.label(
+                    egui::RichText::new(format!("ITME v23.0 • {}", self.organism.title()))
+                        .color(accent)
+                        .strong(),
                 );
                 ui.separator();
 
@@ -215,179 +480,7 @@ impl ItmeGuiApp {
                     self.last_step_instant = Instant::now();
                 }
                 if ui.button("Step").clicked() {
-                    if self.viewport_layout == ViewportLayout::TriOrganism3D {
-                        self.step_all_worlds();
-                    } else {
-                        self.active_world_mut().step();
-                    }
-                }
-                if ui.button("4.25 Ga -> Gaia-2.0 Grand Run!").clicked() {
-                    let epochs = self.active_world_mut().run_continuous_grand_trajectory(10);
-                    self.grand_epochs = epochs.clone();
-                    self.viewport_layout = ViewportLayout::GrandTrajectory;
-                    if let Some(last_ep) = epochs.last() {
-                        self.export_status = Some(format!(
-                            "Completed 8-Epoch 4.25 Ga Grand Trajectory -> {}: L_I = {:.2}, MI = {:.1}b, O2 = {:.2}, Exergy = {:.2}!",
-                            last_ep.epoch.code(),
-                            last_ep.informational_leverage_li,
-                            last_ep.heritable_mutual_info_bits,
-                            last_ep.planetary_o2,
-                            last_ep.planetary_exergy_budget
-                        ));
-                    }
-                }
-                if ui.button("RNR RNA->T-DNA + Virosphere!").clicked() {
-                    let (rn, td, kb) =
-                        self.active_world_mut().trigger_rna_to_dna_virosphere_pulse();
-                    self.export_status = Some(format!(
-                        "RNR & Virosphere: +{rn} U-DNA Transitions, +{td} Megabase T-DNA/UDG Genomes (Cap = {kb:.0} kb)!"
-                    ));
-                }
-                if ui.button("Homochiral D-RNA/L-AA + SGC!").clicked() {
-                    let (hm, sgc, mp) =
-                        self.active_world_mut().trigger_homochiral_sgc_pulse();
-                    self.export_status = Some(format!(
-                        "Homochirality & SGC: +{hm} D-RNA Symmetry Breaks, +{sgc} Universal 20-AA SGC Lineages (MP = {:.1}%)!",
-                        mp * 100.0
-                    ));
-                }
-                if ui.button("Hadean Abiogenesis -> LUCA!").clicked() {
-                    let (rf, lc, eig) =
-                        self.active_world_mut().trigger_hadean_abiogenesis_pulse();
-                    self.export_status = Some(format!(
-                        "Hadean Abiogenesis: +{rf} RAF Protocells, +{lc} LUCA Lineages (Eigen L_max = {eig} nt)!"
-                    ));
-                }
-                if ui.button("Gaia-2.0 Planetary Awakening!").clicked() {
-                    let (fm, aw, ex) =
-                        self.active_world_mut().trigger_planetary_awakening_pulse();
-                    self.export_status = Some(format!(
-                        "Gaia-2.0 Homeostasis: +{fm} Formal Symbionts, +{aw} Planetary Stewards, Planetary Exergy Budget = {ex:.2}!"
-                    ));
-                }
-                if ui.button("Formal AI Symbiont + Proof Check!").clicked() {
-                    let (ms, fm, prf) =
-                        self.active_world_mut().trigger_machine_synthesis_pulse();
-                    self.export_status = Some(if ms > 0 || fm > 0 || prf > 0 {
-                        format!(
-                            "Machine-Verified Synthesis: +{ms} Computational Symbionts, +{fm} Formal-Evaluator Symbioses, {prf} proofs checked!"
-                        )
-                    } else {
-                        "All lineages already at MachineVerifiedSymbiosis (Tails >= 96%)!".to_string()
-                    });
-                }
-                if ui.button("Written Archive + Peer Verify!").clicked() {
-                    let (ar, inst, aud) =
-                        self.active_world_mut().trigger_exosomatic_archive_pulse();
-                    self.export_status = Some(if ar > 0 || inst > 0 || aud > 0 {
-                        format!(
-                            "Exosomatic Epistemology: +{ar} Written Archives, +{inst} Peer-Verified Institutions, {aud} replication audits!"
-                        )
-                    } else {
-                        "All lineages already at PeerVerifiedInstitution (40% cognitive offloading)!".to_string()
-                    });
-                }
-                if ui.button("Symbolic Culture + Deme Recomb!").clicked() {
-                    let (rt, sym, rec) =
-                        self.active_world_mut().trigger_cultural_ratchet_pulse();
-                    self.export_status = Some(if rt > 0 || sym > 0 || rec > 0 {
-                        format!(
-                            "Cumulative Culture: +{rt} Ratchet, +{sym} Symbolic Teaching lineages, +{rec} Cross-Deme Recombinations!"
-                        )
-                    } else {
-                        "Set Teaching Fidelity >= 0.88 and Partial Connectivity (0.15..0.72) for Cross-Deme Symbolic Culture!".to_string()
-                    });
-                }
-                if ui.button("Agro-Crop + Actino Shield!").clicked() {
-                    let (ag, ob, sh) =
-                        self.active_world_mut().trigger_agriculture_domestication_pulse();
-                    self.export_status = Some(if ag > 0 || ob > 0 {
-                        format!(
-                            "Agricultural Ectosymbiosis: +{ag} farming colonies, +{ob} clonal Gongylidia/LeafCutter monocultures, {sh} Pseudonocardia shields!"
-                        )
-                    } else {
-                        "All superorganisms already at 8n LeafCutterAgroEcosystem!".to_string()
-                    });
-                }
-                if ui.button("Eusocial Superorg!").clicked() {
-                    let (eu, sup, pol) =
-                        self.active_world_mut().trigger_superorganism_transition_pulse();
-                    self.export_status = Some(if sup > 0 || eu > 0 {
-                        format!(
-                            "Superorganism ETI: +{eu} Eusocial colonies, +{sup} Obligate Superorganisms, {pol} rebel eggs policed!"
-                        )
-                    } else {
-                        "Raise Queen Monogamy >= 0.75 (Monogamy Window) on Germ-Soma organisms to cross Point of No Return!".to_string()
-                    });
-                }
-                if ui.button("Multicell + Germ-Soma!").clicked() {
-                    let (cl, gs, ap) =
-                        self.active_world_mut().trigger_multicellular_transition_pulse();
-                    self.export_status = Some(if gs > 0 || cl > 0 {
-                        format!(
-                            "Multicellular ETI: +{cl} Clonal clusters, +{gs} Germ-Soma organisms, {ap} apoptotic culls!"
-                        )
-                    } else {
-                        "Need bioenergetic Holobionts to nucleate Clonal Multicellularity & Germ-Soma!".to_string()
-                    });
-                }
-                if ui.button("MRO Reduce!").clicked() {
-                    let (hy, mi, am) = self.active_world_mut().trigger_mro_reduction_pulse();
-                    self.export_status = Some(if am > 0 {
-                        format!(
-                            "Cytosolic SUF active! {am} mitosome(s) shed completely -> Monocercomonoides MRO->0!"
-                        )
-                    } else if hy > 0 || mi > 0 {
-                        format!(
-                            "Anaerobic MRO step: +{hy} Hydrogenosomes (mtDNA=0, H2+ISC), +{mi} Mitosomes (ISC=1)!"
-                        )
-                    } else {
-                        "Need MRO-bearing Holobionts, or raise Cytosolic SUF >= 0.65 to pass Mitosome ISC floor.".to_string()
-                    });
-                }
-                if ui.button("Apico Reduce!").clicked() {
-                    let (conv, shed, lost) =
-                        self.active_world_mut().trigger_apicoplast_reduction_pulse();
-                    self.export_status = Some(if lost > 0 {
-                        format!(
-                            "IPP rescue active! {lost} parasite(s) shed apicoplast completely (Cryptosporidium Apico->0)!"
-                        )
-                    } else if conv > 0 || shed > 0 {
-                        format!(
-                            "Holo->Apico: {conv} converted, {shed} shed Heme/FASII (retaining MEP/IPP + SUF)!"
-                        )
-                    } else {
-                        "Need extant Holobionts, or raise Host IPP Rescue >= 0.65 to pass MEP/SUF floor.".to_string()
-                    });
-                }
-                if ui.button("Klepto Steal!").clicked() {
-                    let (st, hg, fx) = self.active_world_mut().trigger_klepto_steal_pulse();
-                    self.export_status = Some(if fx > 0 {
-                        format!(
-                            "Tipping point crossed! {fx} kleptoplastic predator(s) fixed permanent plastids (+{hg} HGT)!"
-                        )
-                    } else if st > 0 || hg > 0 {
-                        format!("Stole {st} kleptoplasts & recruited +{hg} shopping-bag HGT loci!")
-                    } else {
-                        "Need coexisting non-apicoplast PredatorParasite & Producer/Holobiont prey.".to_string()
-                    });
-                }
-                if ui.button("Symbio 1°!").clicked() {
-                    let fused = self.active_world_mut().trigger_endosymbiotic_pulse();
-                    self.export_status = Some(if fused {
-                        "Fused Producer + Syntroph -> 1° Holobiont (#H, Aerobic Mito)!".to_string()
-                    } else {
-                        "Need coexisting Producer & Syntroph for 1° fusion.".to_string()
-                    });
-                }
-                if ui.button("Serial 2°/3°!").clicked() {
-                    let tier_opt = self.active_world_mut().trigger_serial_endosymbiosis_pulse();
-                    self.export_status = Some(match tier_opt {
-                        Some(t) => format!(
-                            "Engulfed eukaryotic Holobiont -> {t}° Complex Chimera (4 membranes + Nucleomorph)!"
-                        ),
-                        None => "Need an extant 1° or 2° Holobiont + host to trigger serial engulfment.".to_string(),
-                    });
+                    self.step_once();
                 }
                 if ui.button("Export NHX+SVG").clicked() {
                     self.export_snapshot_files();
@@ -399,22 +492,11 @@ impl ItmeGuiApp {
                 );
 
                 ui.separator();
-                ui.label("Organism:");
-                for (idx, org) in OrganismKind::ALL.iter().enumerate() {
-                    if ui
-                        .selectable_label(self.active_org_idx == idx, org.short_title())
-                        .clicked()
-                    {
-                        self.active_org_idx = idx;
-                    }
-                }
-
-                ui.separator();
                 ui.label("View:");
                 ui.selectable_value(
                     &mut self.viewport_layout,
                     ViewportLayout::SpatialAndPhylogeny,
-                    "Spatial + Phylogeny",
+                    "Spatial + Network",
                 );
                 ui.selectable_value(
                     &mut self.viewport_layout,
@@ -424,7 +506,7 @@ impl ItmeGuiApp {
                 ui.selectable_value(
                     &mut self.viewport_layout,
                     ViewportLayout::PhylogenyFull,
-                    "Full Phylogram",
+                    "Full Lineage",
                 );
                 ui.selectable_value(
                     &mut self.viewport_layout,
@@ -436,20 +518,142 @@ impl ItmeGuiApp {
                     ViewportLayout::Blueprint2D,
                     "2D Blueprint",
                 );
-                ui.selectable_value(
-                    &mut self.viewport_layout,
-                    ViewportLayout::TriOrganism3D,
-                    "All 3 Organisms",
-                );
-                ui.selectable_value(
-                    &mut self.viewport_layout,
-                    ViewportLayout::GrandTrajectory,
-                    "4.25 Ga Timeline",
-                );
+                if self.organism == OrganismKind::RnaDnaProtein {
+                    ui.selectable_value(
+                        &mut self.viewport_layout,
+                        ViewportLayout::GrandTrajectory,
+                        "4.25 Ga Timeline",
+                    );
+                }
 
                 ui.separator();
                 ui.checkbox(&mut self.auto_rotate, "Auto-Orbit");
                 ui.checkbox(&mut self.show_labels, "Labels");
+            });
+
+            ui.add_space(2.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    egui::RichText::new("Domain Milestones:")
+                        .small()
+                        .strong()
+                        .color(egui::Color32::from_rgb(148, 163, 184)),
+                );
+                match self.organism {
+                    OrganismKind::RnaDnaProtein => {
+                        if ui.button("4.25 Ga Grand Trajectory").clicked() {
+                            let epochs = self.world.run_continuous_grand_trajectory(10);
+                            self.grand_epochs = epochs.clone();
+                            self.viewport_layout = ViewportLayout::GrandTrajectory;
+                            if let Some(last_ep) = epochs.last() {
+                                self.export_status = Some(format!(
+                                    "8-Epoch Trajectory -> {}: L_I={:.2}, MI={:.1}b, O2={:.2}",
+                                    last_ep.epoch.code(),
+                                    last_ep.informational_leverage_li,
+                                    last_ep.heritable_mutual_info_bits,
+                                    last_ep.planetary_o2
+                                ));
+                            }
+                        }
+                        if ui.button("Hadean Abiogenesis -> LUCA").clicked() {
+                            let (rf, lc, eig) = self.world.trigger_hadean_abiogenesis_pulse();
+                            self.export_status = Some(format!(
+                                "Hadean Abiogenesis: +{rf} RAF Protocells, +{lc} LUCA (Eigen L_max={eig} nt)"
+                            ));
+                        }
+                        if ui.button("Homochiral D/L + SGC").clicked() {
+                            let (hm, sgc, mp) = self.world.trigger_homochiral_sgc_pulse();
+                            self.export_status = Some(format!(
+                                "Homochirality & SGC: +{hm} D-RNA breaks, +{sgc} 20-AA SGC (MP={:.1}%)",
+                                mp * 100.0
+                            ));
+                        }
+                        if ui.button("RNR RNA->T-DNA").clicked() {
+                            let (rn, td, kb) = self.world.trigger_rna_to_dna_virosphere_pulse();
+                            self.export_status = Some(format!(
+                                "RNR & UDG Repair: +{rn} U-DNA, +{td} T-DNA Genomes (Cap={kb:.0} kb)"
+                            ));
+                        }
+                        if ui.button("1°/2° Symbio + MRO").clicked() {
+                            let fused = self.world.trigger_endosymbiotic_pulse();
+                            let ser = self.world.trigger_serial_endosymbiosis_pulse();
+                            let (hy, mi, am) = self.world.trigger_mro_reduction_pulse();
+                            self.export_status = Some(format!(
+                                "Symbiosis & MRO: 1°={fused}, Serial={ser:?}, +Hy:{hy} +MitoS:{mi} +SUF(MRO->0):{am}"
+                            ));
+                        }
+                    }
+                    OrganismKind::HominidPopulation => {
+                        if ui.button("Kin Division & Lithic Guilds").clicked() {
+                            self.jump_to_regime(RegimeId::R30FullyDarwinian);
+                            self.export_status = Some(
+                                "Promoted foraging bands to kin-structured lithic guilds R(3.0-DAR)."
+                                    .to_string(),
+                            );
+                        }
+                        if ui.button("Symbolic Teaching + Ratchet").clicked() {
+                            self.world.controls.symbolic_teaching_fidelity =
+                                self.world.controls.symbolic_teaching_fidelity.max(0.90);
+                            self.world.controls.inter_deme_connectivity =
+                                self.world.controls.inter_deme_connectivity.clamp(0.25, 0.55);
+                            let (rt, sym, rec) = self.world.trigger_cultural_ratchet_pulse();
+                            self.export_status = Some(format!(
+                                "Symbolic Culture: +{rt} ratchets, +{sym} pedagogical lineages, +{rec} deme recombinations"
+                            ));
+                        }
+                        if ui.button("Agro-Ectosymbiosis & Crops").clicked() {
+                            let (ag, ob, sh) =
+                                self.world.trigger_agriculture_domestication_pulse();
+                            self.export_status = Some(format!(
+                                "Cultivar Care: +{ag} farming demes, +{ob} clonal crops, {sh} defensive shields"
+                            ));
+                        }
+                        if ui.button("Written Archive + Peer Audit").clicked() {
+                            let (ar, inst, aud) = self.world.trigger_exosomatic_archive_pulse();
+                            self.export_status = Some(format!(
+                                "Written Archives: +{ar} archives, +{inst} peer institutions, {aud} audits"
+                            ));
+                        }
+                    }
+                    OrganismKind::ArtificialIntelligence => {
+                        if ui.button("Container Checkpoint Scale").clicked() {
+                            self.jump_to_regime(RegimeId::R15Replicative);
+                            self.export_status = Some(
+                                "Scaled stateless container weights across cluster R(1.5-RP)."
+                                    .to_string(),
+                            );
+                        }
+                        if ui.button("Adversarial Arena (PBT)").clicked() {
+                            self.jump_to_regime(RegimeId::R30FullyDarwinian);
+                            self.export_status = Some(
+                                "Activated population-based training & adversarial arena R(3.0-DAR)."
+                                    .to_string(),
+                            );
+                        }
+                        if ui.button("Formal Proof Verifier").clicked() {
+                            let (ms, fm, prf) = self.world.trigger_machine_synthesis_pulse();
+                            self.export_status = Some(format!(
+                                "Formal Verifiers: +{ms} compute symbionts, +{fm} verified loops, {prf} proofs checked"
+                            ));
+                        }
+                        if ui.button("Anti-Collapse Safeguard").clicked() {
+                            self.world.controls.empirical_grounding_floor =
+                                self.world.controls.empirical_grounding_floor.max(0.36);
+                            self.world.controls.formal_verifier_strictness =
+                                self.world.controls.formal_verifier_strictness.max(0.92);
+                            self.world.controls.unverified_publish_pressure =
+                                self.world.controls.unverified_publish_pressure.min(0.18);
+                            for _ in 0..4 {
+                                self.step_once();
+                            }
+                            let m = self.world.latest_metrics();
+                            self.export_status = Some(format!(
+                                "Anti-Collapse Guard active: empiric floor >= 0.36 | TailDiv = {:.2}, Theorems = {:.1}b",
+                                m.mean_tail_diversity, m.mean_verified_theorem_bits
+                            ));
+                        }
+                    }
+                }
             });
             ui.add_space(4.0);
         });
@@ -457,13 +661,12 @@ impl ItmeGuiApp {
 
     fn draw_left_controls(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("itme_left_controls")
-            .default_width(345.0)
+            .default_width(340.0)
             .resizable(true)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.heading("Simulation Mode");
-                    let curr_mode = self.active_world().mode;
-                    let mut selected_mode = curr_mode;
+                    let mut selected_mode = self.world.mode;
                     ui.horizontal(|ui| {
                         ui.selectable_value(
                             &mut selected_mode,
@@ -476,33 +679,24 @@ impl ItmeGuiApp {
                             "Autonomous Sandbox",
                         );
                     });
-                    if selected_mode != curr_mode {
-                        for w in &mut self.worlds {
-                            w.mode = selected_mode;
-                        }
-                    }
+                    self.world.mode = selected_mode;
 
                     if selected_mode == SimulationMode::GuidedCurriculum {
-                        let mut sps = self.active_world().steps_per_stage;
-                        if ui
-                            .add(egui::Slider::new(&mut sps, 12..=120).text("Ticks / Regime"))
-                            .changed()
-                        {
-                            for w in &mut self.worlds {
-                                w.steps_per_stage = sps;
-                            }
-                        }
+                        ui.add(
+                            egui::Slider::new(&mut self.world.steps_per_stage, 12..=120)
+                                .text("Ticks / Regime"),
+                        );
                     } else if ui.button("Stochastic Phase Jump").clicked() {
-                        self.active_world_mut().trigger_network_transition();
+                        self.world.trigger_network_transition();
                     }
 
                     ui.separator();
-                    ui.heading("13 Emergent Regimes");
-                    let active_classified = self.active_world().classified_regime;
+                    ui.heading(format!("{} Regimes (13)", self.organism.short_title()));
+                    let active_classified = self.world.classified_regime;
                     let mut clicked_regime = None;
                     for regime in RegimeId::ALL {
                         let is_curr = regime == active_classified;
-                        let txt = format!("{}  {}", regime.code(), regime.name());
+                        let txt = regime.domain_title(self.organism);
                         let rich = if is_curr {
                             egui::RichText::new(txt)
                                 .strong()
@@ -515,411 +709,243 @@ impl ItmeGuiApp {
                         }
                     }
                     if let Some(reg) = clicked_regime {
-                        self.jump_all_or_active_to_regime(reg);
+                        self.jump_to_regime(reg);
                     }
 
                     ui.separator();
-                    ui.heading("Anaerobic MRO, Apicoplast & Symbiogenesis");
-                    let theta_f = self.active_world().latest_metrics().critical_fidelity_theta;
-                    {
-                        let w = self.active_world_mut();
-                        let mut changed = false;
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.rnr_thiyl_radical_activity,
-                                    0.0..=1.00,
+                    let theta_f = self.world.latest_metrics().critical_fidelity_theta;
+                    let w = &mut self.world;
+                    let mut changed = false;
+
+                    ui.heading("Energetics & Transmission");
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut w.controls.bath_exergy_flux, -0.6..=1.5)
+                                .text("J_in (Supply / Exergy Flux)"),
+                        )
+                        .changed();
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut w.controls.replication_fidelity, 0.40..=1.0)
+                                .text("F_0 (Copy / Update Fidelity)"),
+                        )
+                        .changed();
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut w.controls.landauer_bit_cost, 0.0..=0.008)
+                                .text("k_B T ln2 (Maintenance Cost)"),
+                        )
+                        .changed();
+
+                    ui.add_space(4.0);
+                    match self.organism {
+                        OrganismKind::RnaDnaProtein => {
+                            ui.heading("Prebiotic & Genetic Code");
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.wet_dry_cycle_amplitude,
+                                        0.0..=1.0,
+                                    )
+                                    .text("A_wd (Wet-Dry Condensation)"),
                                 )
-                                .text("k_rnr (Class III RNR 2'-OH->2'-H Radical)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.thymidylate_udg_repair_efficiency,
-                                    0.0..=1.00,
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.hydrothermal_delta_ph,
+                                        0.0..=4.5,
+                                    )
+                                    .text("Delta_pH (Vent FeNiS Gradient)"),
                                 )
-                                .text("e_udg (ThyX U->T + UDG Deamination Repair)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.virosphere_arms_race_coupling,
-                                    0.0..=1.00,
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.magnetite_ciss_spin_bias,
+                                        0.0..=1.0,
+                                    )
+                                    .text("b_ciss (Fe3O4 Chiral Spin Bias)"),
                                 )
-                                .text("v_sym (Virosphere Pol Transfer & Immunity)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.magnetite_ciss_spin_bias,
-                                    0.0..=1.00,
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.rnr_thiyl_radical_activity,
+                                        0.0..=1.0,
+                                    )
+                                    .text("k_rnr (Class III RNR 2'-OH->2'-H)"),
                                 )
-                                .text("b_ciss (Magnetite Fe3O4 CISS Chiral Bias)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.minihelix_chiral_selectivity,
-                                    0.0..=1.00,
-                                )
-                                .text("s_ac (Minihelix 3'-NCCA L-AA Steric Filter)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.communal_code_hgt_rate,
-                                    0.0..=1.00,
-                                )
-                                .text("h_sgc (Communal Progenote SGC HGT Rate)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.wet_dry_cycle_amplitude,
-                                    0.0..=1.00,
-                                )
-                                .text("A_wd (Hot-Spring Wet-Dry Cycles)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.hydrothermal_delta_ph,
-                                    0.0..=4.50,
-                                )
-                                .text("Delta_pH (Alkaline Vent FeNiS Gradient)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.citrate_mg_chelation,
-                                    0.0..=1.00,
-                                )
-                                .text("c_Mg (Citrate-Mg2+ Vesicle Protection)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.ribozyme_polymerase_fidelity,
-                                    0.0..=1.00,
-                                )
-                                .text("f_ribo (Ribozyme Fidelity vs Eigen Cliff)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.biogeochemical_feedback_gain,
-                                    0.0..=1.00,
-                                )
-                                .text("k_gaia (Planetary Biogeochem Coupling)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.planetary_stewardship_coupling,
-                                    0.0..=1.00,
-                                )
-                                .text("s_gaia2 (Homeostatic Stewardship >=0.65)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.extractive_burn_intensity,
-                                    0.0..=1.00,
-                                )
-                                .text("b_burn (Extractive Carbon Burn)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.synthetic_generation_rate,
-                                    0.0..=1.00,
-                                )
-                                .text("g_synth (Synthetic Sampler Throughput)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.formal_verifier_strictness,
-                                    0.0..=1.00,
-                                )
-                                .text("v_formal (Proof-Evaluator Strictness >=0.72)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.empirical_grounding_floor,
-                                    0.0..=0.60,
-                                )
-                                .text("gamma_emp (Empirical Grounding Anchor >=0.12)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.archival_externalization_rate,
-                                    0.0..=0.90,
-                                )
-                                .text("mu_arch (Exosomatic Archive Drive)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.peer_verification_rigor,
-                                    0.0..=1.00,
-                                )
-                                .text("r_peer (Peer-Verification Rigor >=0.70)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.unverified_publish_pressure,
-                                    0.0..=1.00,
-                                )
-                                .text("p_fdr (Unverified Publish Pressure)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.symbolic_teaching_fidelity,
-                                    0.0..=1.00,
-                                )
-                                .text("f_teach (Symbolic Teaching Fidelity >=0.88)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.inter_deme_connectivity,
-                                    0.0..=1.00,
-                                )
-                                .text("c_deme (Deme Connectivity — 0.35 Opt.)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.cultural_innovation_rate,
-                                    0.0..=0.90,
-                                )
-                                .text("mu_innov (Cultural Innovation Drive)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.crop_domestication_rate,
-                                    0.0..=0.90,
-                                )
-                                .text("mu_crop (Gongylidia Domest. Drive)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.agro_pathogen_pressure,
-                                    0.0..=1.00,
-                                )
-                                .text("p_escov (Escovopsis Blight Press.)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.defensive_symbiont_potency,
-                                    0.0..=1.00,
-                                )
-                                .text("d_pseudo (Pseudonocardia Shield)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.queen_monogamy_index,
-                                    0.0..=1.00,
-                                )
-                                .text("m_queen (Monogamy Window >=0.75)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.eusocial_caste_canalization_rate,
-                                    0.0..=0.90,
-                                )
-                                .text("mu_caste (JH Sterile Caste Canal.)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.worker_policing_rate,
-                                    0.0..=1.00,
-                                )
-                                .text("p_police (Worker Kin-Policing)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.multicellular_adhesion_rate,
-                                    0.0..=0.90,
-                                )
-                                .text("alpha_adh (Clonal Staying-Together)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.germ_soma_differentiation_rate,
-                                    0.0..=0.90,
-                                )
-                                .text("mu_gs (Germ-Soma regA Sequest.)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.apoptosis_policing_rate,
-                                    0.0..=1.00,
-                                )
-                                .text("p_apop (Mito Apoptosis Policing)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .checkbox(
-                                &mut w.controls.single_cell_bottleneck,
-                                "Zygotic N=1 Bottleneck (r -> 1.0)",
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(&mut w.controls.ambient_oxygen_level, 0.0..=1.00)
-                                    .text("O2_level (Hypoxia < 0.45)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.anaerobic_mro_reduction_rate,
-                                    0.0..=0.90,
-                                )
-                                .text("mu_mro (Mito->Hydro->MitoS)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.cytosolic_suf_hgt_rescue,
-                                    0.0..=1.00,
-                                )
-                                .text("suf_rescue (Cytosolic SUF >=0.65)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.apicoplast_reduction_rate,
-                                    0.0..=0.90,
-                                )
-                                .text("mu_apico (Holo->Apico Reduction)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.host_metabolite_rescue,
-                                    0.0..=1.00,
-                                )
-                                .text("ipp_rescue (Host IPP Scavenge)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(&mut w.controls.kleptoplasty_rate, 0.0..=0.90)
-                                    .text("gamma_kp (Kleptoplast Theft)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(&mut w.controls.klepto_hgt_rate, 0.0..=0.90)
-                                    .text("mu_hgt (Shopping-Bag HGT)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(&mut w.controls.endosymbiosis_rate, 0.0..=0.80)
+                                .changed();
+
+                            ui.add_space(4.0);
+                            ui.heading("Symbiogenesis & MRO Continuum");
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.endosymbiosis_rate,
+                                        0.0..=0.80,
+                                    )
                                     .text("gamma_1 (1° Endosymbiosis)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(&mut w.controls.cross_feeding_rate, 0.0..=0.75)
-                                    .text("beta_cf (H2 Cross-Feed)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(&mut w.controls.bath_exergy_flux, -0.6..=1.5)
-                                    .text("J_in (Exergy Flux)"),
-                            )
-                            .changed();
-
-                        ui.separator();
-                        ui.heading("Thermodynamic & Evolutionary Controls");
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(&mut w.controls.landauer_bit_cost, 0.0..=0.008)
-                                    .text("k_B T ln2 (Cost)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(&mut w.controls.replication_fidelity, 0.40..=1.0)
-                                    .text("F_0 (Base Fid.)"),
-                            )
-                            .changed();
-
-                        let f_eff = w.controls.effective_fidelity();
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "F_eff = {:.3} vs Eigen theta_F = {:.3}",
-                                f_eff, theta_f
-                            ))
-                            .small()
-                            .color(if f_eff >= theta_f {
-                                egui::Color32::from_rgb(100, 235, 165)
-                            } else {
-                                egui::Color32::from_rgb(255, 145, 105)
-                            }),
-                        );
-                        changed |= ui
-                            .checkbox(
-                                &mut w.controls.artificial_selection,
-                                "Meta-Engineered Objective (4.0)",
-                            )
-                            .changed();
-
-                        if changed {
-                            w.mode = SimulationMode::OrganicSandbox;
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.ambient_oxygen_level,
+                                        0.0..=1.0,
+                                    )
+                                    .text("O2_level (Hypoxia < 0.45)"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.cytosolic_suf_hgt_rescue,
+                                        0.0..=1.0,
+                                    )
+                                    .text("suf_rescue (Cytosolic SUF >=0.65)"),
+                                )
+                                .changed();
                         }
+                        OrganismKind::HominidPopulation => {
+                            ui.heading("Cultural Transmission & Demes");
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.symbolic_teaching_fidelity,
+                                        0.0..=1.0,
+                                    )
+                                    .text("f_teach (Symbolic Pedagogy)"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.inter_deme_connectivity,
+                                        0.0..=1.0,
+                                    )
+                                    .text("c_deme (Inter-Band Contact)"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.cultural_innovation_rate,
+                                        0.0..=0.90,
+                                    )
+                                    .text("mu_innov (Innovation Drive)"),
+                                )
+                                .changed();
+
+                            ui.add_space(4.0);
+                            ui.heading("Subsistence & Written Archives");
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.crop_domestication_rate,
+                                        0.0..=0.90,
+                                    )
+                                    .text("mu_crop (Cultivar Domestication)"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.archival_externalization_rate,
+                                        0.0..=0.90,
+                                    )
+                                    .text("mu_arch (Written Archival Drive)"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.peer_verification_rigor,
+                                        0.0..=1.0,
+                                    )
+                                    .text("r_peer (Peer Replication Rigor)"),
+                                )
+                                .changed();
+                        }
+                        OrganismKind::ArtificialIntelligence => {
+                            ui.heading("Training, Plasticity & Distillation");
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.synthetic_generation_rate,
+                                        0.0..=1.0,
+                                    )
+                                    .text("g_synth (Synthetic Rollout Rate)"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.memory_plasticity,
+                                        0.0..=1.0,
+                                    )
+                                    .text("M_plast (In-Context / LoRA)"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.soft_inheritance_coupling,
+                                        0.0..=1.0,
+                                    )
+                                    .text("alpha_distill (Teacher Distillation)"),
+                                )
+                                .changed();
+
+                            ui.add_space(4.0);
+                            ui.heading("Formal Verification & Anti-Collapse");
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.formal_verifier_strictness,
+                                        0.0..=1.0,
+                                    )
+                                    .text("v_formal (Proof Verifier >=0.72)"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.empirical_grounding_floor,
+                                        0.0..=0.60,
+                                    )
+                                    .text("gamma_emp (Empirical Anchor >=0.12)"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut w.controls.unverified_publish_pressure,
+                                        0.0..=1.0,
+                                    )
+                                    .text("p_noise (Unverified Publish Rate)"),
+                                )
+                                .changed();
+                        }
+                    }
+
+                    let f_eff = w.controls.effective_fidelity();
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "F_eff = {:.3} vs Eigen theta_F = {:.3}",
+                            f_eff, theta_f
+                        ))
+                        .small()
+                        .color(if f_eff >= theta_f {
+                            egui::Color32::from_rgb(100, 235, 165)
+                        } else {
+                            egui::Color32::from_rgb(255, 145, 105)
+                        }),
+                    );
+                    if changed {
+                        w.mode = SimulationMode::OrganicSandbox;
                     }
                 });
             });
@@ -927,23 +953,28 @@ impl ItmeGuiApp {
 
     fn draw_right_inspector(&mut self, ctx: &egui::Context) {
         egui::SidePanel::right("itme_right_inspector")
-            .default_width(370.0)
+            .default_width(365.0)
             .resizable(true)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    let w = self.active_world();
+                    let w = &self.world;
                     let m = w.latest_metrics();
                     let reg = w.classified_regime;
 
-                    ui.heading("Emergent Classified Regime");
+                    ui.heading("Emergent Domain Regime");
                     ui.label(
-                        egui::RichText::new(reg.full_title())
-                            .size(16.0)
+                        egui::RichText::new(reg.domain_title(self.organism))
+                            .size(15.5)
                             .strong()
                             .color(egui::Color32::from_rgb(255, 214, 102)),
                     );
-                    ui.label(egui::RichText::new(reg.core_concept()).italics());
-                    ui.monospace(format!("Emergent {}", m.diagnostic));
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(reg.domain_concept(self.organism)).italics(),
+                        )
+                        .wrap(),
+                    );
+                    ui.monospace(format!("Diagnostic {}", m.diagnostic));
 
                     let phase_col = match m.phase {
                         OrderPhase::Adaptive => egui::Color32::from_rgb(95, 235, 165),
@@ -953,110 +984,173 @@ impl ItmeGuiApp {
                     ui.colored_label(phase_col, format!("Phase: {}", m.phase.label()));
 
                     if let Some(ref status) = self.export_status {
-                        ui.colored_label(egui::Color32::from_rgb(130, 245, 205), status);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(status)
+                                    .small()
+                                    .color(egui::Color32::from_rgb(130, 245, 205)),
+                            )
+                            .wrap(),
+                        );
                     }
 
                     ui.separator();
-                    ui.heading("Anaerobic MRO, Apicoplast & Symbio Telemetry");
-                    egui::Grid::new("itme_v12_grid")
+                    ui.heading(format!("{} Telemetry", self.organism.short_title()));
+                    egui::Grid::new("itme_domain_metrics_grid")
                         .striped(true)
                         .num_columns(2)
                         .show(ui, |ui| {
-                            ui.label("MROs (Aero / Hydro / MitoS / 0)");
-                            ui.monospace(format!(
-                                "{} / {} / {} / {} (Paths:{:.1})",
-                                m.aerobic_mito_count,
-                                m.hydrogenosome_count,
-                                m.mitosome_count,
-                                m.amiteukaryote_count,
-                                m.mean_mro_pathways
-                            ));
-                            ui.end_row();
-
-                            ui.label("MRO Transitions");
-                            ui.monospace(format!(
-                                "Mito->Hy:{} | Hy->Mi:{} | MRO->0:{}",
-                                m.hydrogenosome_transition_events,
-                                m.mitosome_transition_events,
-                                m.mro_complete_loss_events
-                            ));
-                            ui.end_row();
-
-                            ui.label("Apicoplast Parasites / Paths");
-                            ui.monospace(format!(
-                                "{} / {:.1} paths (Holo->Ap:{}, Ap->0:{})",
-                                m.apicoplast_parasite_count,
-                                m.mean_apicoplast_pathways,
-                                m.apicoplast_transition_events,
-                                m.apicoplast_loss_events
-                            ));
-                            ui.end_row();
-
-                            ui.label("Guilds (P / Syn / Hol / X)");
-                            ui.monospace(format!(
-                                "{} / {} / {} / {}",
-                                m.producer_count,
-                                m.syntroph_count,
-                                m.holobiont_count,
-                                m.predator_count
-                            ));
-                            ui.end_row();
-
                             ui.label("Order O / O_pop");
+                            ui.monospace(format!("{:.2} / {:.2}", m.order_o, m.ecosystem_order_pop));
+                            ui.end_row();
+
+                            ui.label("MI (bits) / Adami rho");
                             ui.monospace(format!(
-                                "{:.2} / {:.2}",
-                                m.order_o, m.ecosystem_order_pop
+                                "{:.2}b / {:.3}",
+                                m.heritable_mutual_info_bits, m.adami_conservation_rho
                             ));
                             ui.end_row();
+
+                            match self.organism {
+                                OrganismKind::RnaDnaProtein => {
+                                    ui.label("Oligomer / Eigen L_max");
+                                    ui.monospace(format!(
+                                        "{:.1} nt / {} nt",
+                                        m.mean_rna_oligomer_nt, m.eigen_max_length_nt
+                                    ));
+                                    ui.end_row();
+
+                                    ui.label("Genome Cap / D-ee");
+                                    ui.monospace(format!(
+                                        "{:.1} kb / {:.0}%",
+                                        m.genome_capacity_kb,
+                                        m.ribose_ee_d * 100.0
+                                    ));
+                                    ui.end_row();
+
+                                    ui.label("MROs (Aero/Hy/Mi/0)");
+                                    ui.monospace(format!(
+                                        "{}/{}/{}/{} (P:{:.1})",
+                                        m.aerobic_mito_count,
+                                        m.hydrogenosome_count,
+                                        m.mitosome_count,
+                                        m.amiteukaryote_count,
+                                        m.mean_mro_pathways
+                                    ));
+                                    ui.end_row();
+
+                                    ui.label("Apicoplast Lineages");
+                                    ui.monospace(format!(
+                                        "{} ({:.1} paths)",
+                                        m.apicoplast_parasite_count, m.mean_apicoplast_pathways
+                                    ));
+                                    ui.end_row();
+                                }
+                                OrganismKind::HominidPopulation => {
+                                    ui.label("Population / Species");
+                                    ui.monospace(format!("{} / {} clades", m.population_size, m.species_count));
+                                    ui.end_row();
+
+                                    ui.label("Deme Divergence F_ST");
+                                    ui.monospace(format!(
+                                        "{:.3} (Rec: {})",
+                                        m.fst_fixation_index, m.cross_deme_recombinations
+                                    ));
+                                    ui.end_row();
+
+                                    ui.label("Cultural Rep / Teach");
+                                    ui.monospace(format!(
+                                        "{:.1}b / {:.2}",
+                                        m.mean_cultural_repertoire_bits,
+                                        m.mean_neural_teaching_capacity
+                                    ));
+                                    ui.end_row();
+
+                                    ui.label("Written Archive / FDR");
+                                    ui.monospace(format!(
+                                        "{:.1}b / {:.1}%",
+                                        m.mean_exosomatic_archive_bits,
+                                        m.mean_archive_fdr_load * 100.0
+                                    ));
+                                    ui.end_row();
+                                }
+                                OrganismKind::ArtificialIntelligence => {
+                                    ui.label("Active Workers / Symbionts");
+                                    ui.monospace(format!(
+                                        "{} / {} ({} verified)",
+                                        m.population_size,
+                                        m.computational_symbiont_count,
+                                        m.formal_symbio_count
+                                    ));
+                                    ui.end_row();
+
+                                    ui.label("Verified Theorem Bits");
+                                    ui.monospace(format!("{:.2} bits", m.mean_verified_theorem_bits));
+                                    ui.end_row();
+
+                                    ui.label("Tail Diversity (Anti-Collapse)");
+                                    ui.monospace(format!("{:.3}", m.mean_tail_diversity));
+                                    ui.end_row();
+
+                                    ui.label("Proofs Checked / Collapses");
+                                    ui.monospace(format!(
+                                        "{} / {}",
+                                        m.formal_proofs_verified, m.recursive_model_collapses
+                                    ));
+                                    ui.end_row();
+                                }
+                            }
                         });
 
                     ui.separator();
-                    ui.heading("Emergent Capabilities");
+                    ui.heading("Domain Capabilities");
                     ui.horizontal_wrapped(|ui| {
                         flag_chip(ui, "Driven", m.flags.exergy_driven);
                         flag_chip(ui, "Replicate", m.flags.replication);
                         flag_chip(ui, "Select", m.flags.selection);
-                        flag_chip(ui, "1°Holo", m.flags.endosymbiotic_fusion);
-                        flag_chip(ui, "2°/3°Serial", m.flags.serial_endosymbiosis);
-                        flag_chip(ui, "Hydrogenosome", m.flags.hydrogenosome_fermentation);
-                        flag_chip(ui, "RNR_dNTP", m.flags.rnr_deoxyribose_synthesis);
-                        flag_chip(ui, "ThyX_UDG_BER", m.flags.thymine_udg_deamination_repair);
-                        flag_chip(ui, "ViroCoevolved", m.flags.virosphere_dna_coevolution);
-                        flag_chip(ui, "Homochiral_DL", m.flags.homochiral_d_rna_l_aa);
-                        flag_chip(ui, "MinihelixAcyl", m.flags.stereoselective_aminoacylation);
-                        flag_chip(ui, "UniversalSGC", m.flags.error_minimized_universal_sgc);
-                        flag_chip(ui, "RAF_Closure", m.flags.prebiotic_raf_closure);
-                        flag_chip(ui, "RiboHypercycle", m.flags.ribozyme_hypercycle_active);
-                        flag_chip(ui, "DarwinianLUCA", m.flags.darwinian_threshold_luca);
-                        flag_chip(ui, "GOE_O2", m.flags.oxygenic_goe_regulation);
-                        flag_chip(ui, "NutrientLoop", m.flags.syntrophic_nutrient_closure);
-                        flag_chip(ui, "Gaia2Awakened", m.flags.planetary_homeostatic_awakening);
-                        flag_chip(ui, "CompSymbiont", m.flags.computational_symbiont);
-                        flag_chip(ui, "FormalProof", m.flags.formal_proof_verification);
-                        flag_chip(ui, "CollapseGuard", m.flags.model_collapse_safeguard);
-                        flag_chip(ui, "ExoOffload", m.flags.exosomatic_memory_offloading);
-                        flag_chip(ui, "WrittenArch", m.flags.written_archival_storage);
-                        flag_chip(ui, "PeerVerified", m.flags.institutional_peer_verification);
-                        flag_chip(ui, "DualInherit", m.flags.dual_gene_culture_inheritance);
-                        flag_chip(ui, "CultRatchet", m.flags.cumulative_cultural_ratchet);
-                        flag_chip(ui, "SymbolicTeach", m.flags.symbolic_pedagogical_teaching);
-                        flag_chip(ui, "AgriDomest", m.flags.agricultural_domestication);
-                        flag_chip(ui, "ClonalCrop", m.flags.clonal_crop_monoculture);
-                        flag_chip(ui, "ActinoShield", m.flags.defensive_microbiome_symbiosis);
-                        flag_chip(ui, "Eusocial", m.flags.eusocial_colony);
-                        flag_chip(ui, "SuperorgCastes", m.flags.sterile_worker_castes);
-                        flag_chip(ui, "KinPolicing", m.flags.worker_kin_policing);
-                        flag_chip(ui, "ClonalMC", m.flags.clonal_multicellularity);
-                        flag_chip(ui, "GermSoma", m.flags.germ_soma_division);
-                        flag_chip(ui, "Apoptosis", m.flags.apoptotic_cheater_policing);
-                        flag_chip(ui, "Mitosome(ISC)", m.flags.mitosome_isc_retention);
-                        flag_chip(ui, "MRO->0(SUF)", m.flags.amiteukaryote_mro_loss);
-                        flag_chip(ui, "Apicoplast", m.flags.apicoplast_reduction);
-                        flag_chip(ui, "Apico->0", m.flags.apicoplast_loss);
+                        match self.organism {
+                            OrganismKind::RnaDnaProtein => {
+                                flag_chip(ui, "RAF_Closure", m.flags.prebiotic_raf_closure);
+                                flag_chip(ui, "RiboHypercycle", m.flags.ribozyme_hypercycle_active);
+                                flag_chip(ui, "Homochiral_DL", m.flags.homochiral_d_rna_l_aa);
+                                flag_chip(ui, "UniversalSGC", m.flags.error_minimized_universal_sgc);
+                                flag_chip(ui, "RNR_dNTP", m.flags.rnr_deoxyribose_synthesis);
+                                flag_chip(ui, "ThyX_UDG", m.flags.thymine_udg_deamination_repair);
+                                flag_chip(ui, "DarwinianLUCA", m.flags.darwinian_threshold_luca);
+                                flag_chip(ui, "1°Holo", m.flags.endosymbiotic_fusion);
+                                flag_chip(ui, "2°/3°Serial", m.flags.serial_endosymbiosis);
+                                flag_chip(ui, "Hydrogenosome", m.flags.hydrogenosome_fermentation);
+                                flag_chip(ui, "Mitosome(ISC)", m.flags.mitosome_isc_retention);
+                                flag_chip(ui, "MRO->0(SUF)", m.flags.amiteukaryote_mro_loss);
+                                flag_chip(ui, "ClonalMC", m.flags.clonal_multicellularity);
+                                flag_chip(ui, "GermSoma", m.flags.germ_soma_division);
+                            }
+                            OrganismKind::HominidPopulation => {
+                                flag_chip(ui, "Plasticity", m.flags.memory);
+                                flag_chip(ui, "NicheBuild", m.flags.niche_construction);
+                                flag_chip(ui, "DualInherit", m.flags.dual_gene_culture_inheritance);
+                                flag_chip(ui, "CultRatchet", m.flags.cumulative_cultural_ratchet);
+                                flag_chip(ui, "SymbolicTeach", m.flags.symbolic_pedagogical_teaching);
+                                flag_chip(ui, "AgriDomest", m.flags.agricultural_domestication);
+                                flag_chip(ui, "ClonalCrop", m.flags.clonal_crop_monoculture);
+                                flag_chip(ui, "ExoOffload", m.flags.exosomatic_memory_offloading);
+                                flag_chip(ui, "WrittenArch", m.flags.written_archival_storage);
+                                flag_chip(ui, "PeerVerified", m.flags.institutional_peer_verification);
+                            }
+                            OrganismKind::ArtificialIntelligence => {
+                                flag_chip(ui, "WeightPlastic", m.flags.memory);
+                                flag_chip(ui, "Distillation", m.flags.soft_inheritance);
+                                flag_chip(ui, "VectorArchive", m.flags.written_archival_storage);
+                                flag_chip(ui, "PeerAudit", m.flags.institutional_peer_verification);
+                                flag_chip(ui, "CompSymbiont", m.flags.computational_symbiont);
+                                flag_chip(ui, "FormalProof", m.flags.formal_proof_verification);
+                                flag_chip(ui, "CollapseGuard", m.flags.model_collapse_safeguard);
+                            }
+                        }
                     });
 
                     ui.separator();
-                    ui.heading("Live Extended Newick (eNewick #H + MRO NHX)");
+                    ui.heading("Live Extended Newick (NHX)");
                     let nhx_str = w.export_newick(true);
                     let snippet = if nhx_str.chars().count() > 240 {
                         let head: String = nhx_str.chars().take(240).collect();
@@ -1071,17 +1165,29 @@ impl ItmeGuiApp {
 
     fn draw_bottom_telemetry_plots(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("itme_bottom_plots")
-            .min_height(150.0)
-            .default_height(160.0)
+            .min_height(145.0)
+            .default_height(155.0)
             .resizable(true)
             .show(ctx, |ui| {
-                let w = self.active_world();
+                let w = &self.world;
                 ui.horizontal(|ui| {
-                    ui.strong(format!("ITME v12.0 Trajectories — {}", w.organism.title()));
+                    ui.strong(format!("ITME v23.0 Trajectories — {}", self.organism.title()));
                     ui.separator();
                     ui.colored_label(egui::Color32::from_rgb(80, 220, 255), "Order (O)");
-                    ui.colored_label(egui::Color32::from_rgb(6, 214, 160), "Hydrogenosomes");
-                    ui.colored_label(egui::Color32::from_rgb(255, 209, 102), "Mitosomes (ISC=1)");
+                    match self.organism {
+                        OrganismKind::RnaDnaProtein => {
+                            ui.colored_label(egui::Color32::from_rgb(6, 214, 160), "Hydrogenosomes");
+                            ui.colored_label(egui::Color32::from_rgb(255, 209, 102), "Mitosomes (ISC=1)");
+                        }
+                        OrganismKind::HominidPopulation => {
+                            ui.colored_label(egui::Color32::from_rgb(6, 214, 160), "Cultural Repertoire (bits)");
+                            ui.colored_label(egui::Color32::from_rgb(255, 209, 102), "Written Archive (bits)");
+                        }
+                        OrganismKind::ArtificialIntelligence => {
+                            ui.colored_label(egui::Color32::from_rgb(6, 214, 160), "Verified Theorem Bits");
+                            ui.colored_label(egui::Color32::from_rgb(199, 125, 255), "Tail Diversity (x10)");
+                        }
+                    }
                 });
 
                 let avail = ui.available_size();
@@ -1130,37 +1236,107 @@ impl ItmeGuiApp {
                     egui::Color32::from_rgb(175, 190, 220),
                 );
 
-                let max_right = w
-                    .history
-                    .iter()
-                    .map(|m| m.hydrogenosome_count.max(m.mitosome_count) as f32)
-                    .fold(10.0_f32, f32::max)
-                    * 1.15;
-                draw_series(
-                    &painter,
-                    right_plot,
-                    &w.history,
-                    |m| m.hydrogenosome_count as f32,
-                    0.0,
-                    max_right,
-                    egui::Color32::from_rgb(6, 214, 160),
-                );
-                draw_series(
-                    &painter,
-                    right_plot,
-                    &w.history,
-                    |m| m.mitosome_count as f32,
-                    0.0,
-                    max_right,
-                    egui::Color32::from_rgb(255, 209, 102),
-                );
-                painter.text(
-                    right_plot.left_top() + egui::vec2(6.0, 4.0),
-                    egui::Align2::LEFT_TOP,
-                    format!("Hydrogenosomes & Mitosomes [0 .. {:.0}]", max_right),
-                    egui::FontId::monospace(10.5),
-                    egui::Color32::from_rgb(175, 190, 220),
-                );
+                match self.organism {
+                    OrganismKind::RnaDnaProtein => {
+                        let max_right = w
+                            .history
+                            .iter()
+                            .map(|m| m.hydrogenosome_count.max(m.mitosome_count) as f32)
+                            .fold(10.0_f32, f32::max)
+                            * 1.15;
+                        draw_series(
+                            &painter,
+                            right_plot,
+                            &w.history,
+                            |m| m.hydrogenosome_count as f32,
+                            0.0,
+                            max_right,
+                            egui::Color32::from_rgb(6, 214, 160),
+                        );
+                        draw_series(
+                            &painter,
+                            right_plot,
+                            &w.history,
+                            |m| m.mitosome_count as f32,
+                            0.0,
+                            max_right,
+                            egui::Color32::from_rgb(255, 209, 102),
+                        );
+                        painter.text(
+                            right_plot.left_top() + egui::vec2(6.0, 4.0),
+                            egui::Align2::LEFT_TOP,
+                            format!("Hydrogenosomes & Mitosomes [0 .. {:.0}]", max_right),
+                            egui::FontId::monospace(10.5),
+                            egui::Color32::from_rgb(175, 190, 220),
+                        );
+                    }
+                    OrganismKind::HominidPopulation => {
+                        let max_right = w
+                            .history
+                            .iter()
+                            .map(|m| m.mean_cultural_repertoire_bits.max(m.mean_exosomatic_archive_bits) as f32)
+                            .fold(8.0_f32, f32::max)
+                            * 1.15;
+                        draw_series(
+                            &painter,
+                            right_plot,
+                            &w.history,
+                            |m| m.mean_cultural_repertoire_bits as f32,
+                            0.0,
+                            max_right,
+                            egui::Color32::from_rgb(6, 214, 160),
+                        );
+                        draw_series(
+                            &painter,
+                            right_plot,
+                            &w.history,
+                            |m| m.mean_exosomatic_archive_bits as f32,
+                            0.0,
+                            max_right,
+                            egui::Color32::from_rgb(255, 209, 102),
+                        );
+                        painter.text(
+                            right_plot.left_top() + egui::vec2(6.0, 4.0),
+                            egui::Align2::LEFT_TOP,
+                            format!("Cultural & Written Archive Bits [0 .. {:.1}]", max_right),
+                            egui::FontId::monospace(10.5),
+                            egui::Color32::from_rgb(175, 190, 220),
+                        );
+                    }
+                    OrganismKind::ArtificialIntelligence => {
+                        let max_right = w
+                            .history
+                            .iter()
+                            .map(|m| (m.mean_verified_theorem_bits as f32).max(m.mean_tail_diversity as f32 * 10.0))
+                            .fold(10.0_f32, f32::max)
+                            * 1.15;
+                        draw_series(
+                            &painter,
+                            right_plot,
+                            &w.history,
+                            |m| m.mean_verified_theorem_bits as f32,
+                            0.0,
+                            max_right,
+                            egui::Color32::from_rgb(6, 214, 160),
+                        );
+                        draw_series(
+                            &painter,
+                            right_plot,
+                            &w.history,
+                            |m| (m.mean_tail_diversity as f32) * 10.0,
+                            0.0,
+                            max_right,
+                            egui::Color32::from_rgb(199, 125, 255),
+                        );
+                        painter.text(
+                            right_plot.left_top() + egui::vec2(6.0, 4.0),
+                            egui::Align2::LEFT_TOP,
+                            format!("Verified Theorem Bits & TailDiv [0 .. {:.1}]", max_right),
+                            egui::FontId::monospace(10.5),
+                            egui::Color32::from_rgb(175, 190, 220),
+                        );
+                    }
+                }
             });
     }
 
@@ -1193,7 +1369,7 @@ impl ItmeGuiApp {
 
             match self.viewport_layout {
                 ViewportLayout::SpatialAndPhylogeny => {
-                    let w = self.active_world();
+                    let w = &self.world;
                     let mid_x = full_rect.left() + full_rect.width() * 0.46;
                     let left_r = egui::Rect::from_min_max(
                         full_rect.min + egui::vec2(6.0, 6.0),
@@ -1221,7 +1397,7 @@ impl ItmeGuiApp {
                     paint_phylogram_tree(&painter, right_r.shrink(4.0), w, self.show_labels);
                 }
                 ViewportLayout::SpatialGridAnd3D => {
-                    let w = self.active_world();
+                    let w = &self.world;
                     let scene = w.current_scene();
                     let mid_x = full_rect.left() + full_rect.width() * 0.48;
                     let left_r = egui::Rect::from_min_max(
@@ -1243,11 +1419,10 @@ impl ItmeGuiApp {
                     paint_scene_3d(&painter, right_r, &scene, &self.camera, self.show_labels);
                 }
                 ViewportLayout::PhylogenyFull => {
-                    let w = self.active_world();
-                    paint_phylogram_tree(&painter, full_rect.shrink(8.0), w, self.show_labels);
+                    paint_phylogram_tree(&painter, full_rect.shrink(8.0), &self.world, self.show_labels);
                 }
                 ViewportLayout::Perspective3D => {
-                    let scene = self.active_world().current_scene();
+                    let scene = self.world.current_scene();
                     paint_scene_3d(
                         &painter,
                         full_rect.shrink(6.0),
@@ -1257,107 +1432,8 @@ impl ItmeGuiApp {
                     );
                 }
                 ViewportLayout::Blueprint2D => {
-                    let scene = self.active_world().current_scene();
+                    let scene = self.world.current_scene();
                     paint_scene_2d(&painter, full_rect.shrink(6.0), &scene, self.show_labels);
-                }
-                ViewportLayout::TriOrganism3D => {
-                    let titles = [
-                        "1. RNA / DNA / Protein",
-                        "2. Hominid Population",
-                        "3. AI Systems",
-                    ];
-                    let subtitles = [
-                        "Symbiogenetic Cell & Organelle Continuum",
-                        "Biocultural Niche & Exosomatic Coupling",
-                        "Hierarchical Attention & World-Model Graph",
-                    ];
-                    let third = full_rect.width() / 3.0;
-                    for i in 0..3 {
-                        let sub = egui::Rect::from_min_max(
-                            egui::pos2(
-                                full_rect.left() + third * (i as f32) + 4.0,
-                                full_rect.top() + 4.0,
-                            ),
-                            egui::pos2(
-                                full_rect.left() + third * ((i + 1) as f32) - 4.0,
-                                full_rect.bottom() - 4.0,
-                            ),
-                        );
-                        paint_framed_box(
-                            &painter,
-                            sub,
-                            6.0,
-                            egui::Color32::from_rgb(11, 16, 30),
-                            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(38, 54, 90)),
-                        );
-                        let sub_p = painter.with_clip_rect(sub.shrink(1.0));
-                        let scene = self.worlds[i].current_scene();
-                        let p_sum = self.worlds[i].phylo_summary();
-
-                        sub_p.rect_filled(
-                            egui::Rect::from_min_max(
-                                sub.left_top(),
-                                egui::pos2(sub.right(), sub.top() + 42.0),
-                            ),
-                            0.0,
-                            egui::Color32::from_rgb(15, 23, 42),
-                        );
-                        sub_p.text(
-                            sub.left_top() + egui::vec2(10.0, 6.0),
-                            egui::Align2::LEFT_TOP,
-                            titles[i],
-                            egui::FontId::proportional(13.0),
-                            egui::Color32::from_rgb(230, 240, 255),
-                        );
-                        sub_p.text(
-                            sub.left_top() + egui::vec2(10.0, 24.0),
-                            egui::Align2::LEFT_TOP,
-                            subtitles[i],
-                            egui::FontId::proportional(10.5),
-                            egui::Color32::from_rgb(125, 211, 252),
-                        );
-                        sub_p.line_segment(
-                            [
-                                egui::pos2(sub.left(), sub.top() + 42.0),
-                                egui::pos2(sub.right(), sub.top() + 42.0),
-                            ],
-                            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(38, 54, 90)),
-                        );
-
-                        let scene_rect = egui::Rect::from_min_max(
-                            egui::pos2(sub.left() + 4.0, sub.top() + 44.0),
-                            egui::pos2(sub.right() - 4.0, sub.bottom() - 28.0),
-                        );
-                        let scene_p = sub_p.with_clip_rect(scene_rect);
-                        paint_scene_3d(
-                            &scene_p,
-                            scene_rect,
-                            &scene,
-                            &self.camera,
-                            self.show_labels,
-                        );
-
-                        sub_p.line_segment(
-                            [
-                                egui::pos2(sub.left(), sub.bottom() - 26.0),
-                                egui::pos2(sub.right(), sub.bottom() - 26.0),
-                            ],
-                            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(38, 54, 90)),
-                        );
-                        sub_p.text(
-                            egui::pos2(sub.left() + 10.0, sub.bottom() - 13.0),
-                            egui::Align2::LEFT_CENTER,
-                            format!(
-                                "Nodes:{} | Edges:{} | MRCA:N{} | #H:{}",
-                                scene.nodes_3d.len(),
-                                scene.edges_3d.len(),
-                                p_sum.mrca_id,
-                                p_sum.endosymbiotic_fusions
-                            ),
-                            egui::FontId::monospace(9.0),
-                            egui::Color32::from_rgb(148, 163, 184),
-                        );
-                    }
                 }
                 ViewportLayout::GrandTrajectory => {
                     self.paint_grand_trajectory_viewport(&painter, full_rect);
@@ -1858,24 +1934,48 @@ fn paint_phylogram_tree(
     let layout = world.current_phylogram_layout();
     let p_sum = world.phylo_summary();
 
+    let (net_title, net_legend) = match world.organism {
+        OrganismKind::RnaDnaProtein => (
+            format!(
+                "Network — N{} | Hy:{} Mit:{} MRO0:{} | #H:{}",
+                p_sum.mrca_id,
+                p_sum.hydrogenosome_transition_events,
+                p_sum.mitosome_transition_events,
+                p_sum.mro_complete_loss_events,
+                p_sum.endosymbiotic_fusions
+            ),
+            "Teal=Hydro(H2) | Gold=MitoS | Cyan=MRO0 | Violet=Aero",
+        ),
+        OrganismKind::HominidPopulation => (
+            format!(
+                "Cultural & Genealogical Lineage — MRCA:N{} | Deme Recomb:{} | Taxa:{}",
+                p_sum.mrca_id,
+                world.total_cross_deme_recombinations,
+                world.last_species_count
+            ),
+            "Cyan=Forager | Green=Guild | Gold=Archive | Violet=Synergy",
+        ),
+        OrganismKind::ArtificialIntelligence => (
+            format!(
+                "Model & Distillation Graph — Root:N{} | Proofs:{} | Lineages:{}",
+                p_sum.mrca_id,
+                world.total_formal_proofs_verified,
+                world.population.len()
+            ),
+            "Cyan=BaseWorker | Green=Verified | Gold=Distilled | Violet=Enclave",
+        ),
+    };
     painter.text(
         rect.left_top() + egui::vec2(8.0, 4.0),
         egui::Align2::LEFT_TOP,
-        format!(
-            "Network — N{} | Hy:{} Mit:{} MRO0:{} | #H:{}",
-            p_sum.mrca_id,
-            p_sum.hydrogenosome_transition_events,
-            p_sum.mitosome_transition_events,
-            p_sum.mro_complete_loss_events,
-            p_sum.endosymbiotic_fusions
-        ),
+        net_title,
         egui::FontId::proportional(12.5),
         egui::Color32::from_rgb(230, 240, 255),
     );
     painter.text(
         rect.left_top() + egui::vec2(8.0, 21.0),
         egui::Align2::LEFT_TOP,
-        "Teal=Hydro(H2) | Gold=MitoS | Cyan=MRO0 | Violet=Aero",
+        net_legend,
         egui::FontId::monospace(9.0),
         egui::Color32::from_rgb(142, 168, 212),
     );
@@ -2073,20 +2173,40 @@ fn paint_spatial_grid(
 ) {
     let painter = &painter.with_clip_rect(rect);
     let m = world.latest_metrics();
+    let (sp_title, sp_legend) = match world.organism {
+        OrganismKind::RnaDnaProtein => (
+            format!(
+                "Spatial — Aero:{} Hy:{} Mit:{} MRO0:{}",
+                m.aerobic_mito_count, m.hydrogenosome_count, m.mitosome_count, m.amiteukaryote_count
+            ),
+            "Teal=Hydro | Gold=MitoS(ISC) | Cyan=MRO0(SUF)",
+        ),
+        OrganismKind::HominidPopulation => (
+            format!(
+                "Territorial Catchments — Pop:{} | Cult:{:.1}b | F_ST:{:.2}",
+                m.population_size, m.mean_cultural_repertoire_bits, m.fst_fixation_index
+            ),
+            "Teal=Hearth | Gold=Archive | Green=Cultivar | Blue=Band",
+        ),
+        OrganismKind::ArtificialIntelligence => (
+            format!(
+                "Compute Cluster Grid — Agents:{} | Proofs:{} | TailDiv:{:.2}",
+                m.population_size, m.formal_proofs_verified, m.mean_tail_diversity
+            ),
+            "Cyan=Worker | Green=Verifier | Violet=Enclave | Gold=Cached",
+        ),
+    };
     painter.text(
         rect.left_top() + egui::vec2(8.0, 4.0),
         egui::Align2::LEFT_TOP,
-        format!(
-            "Spatial — Aero:{} Hy:{} Mit:{} MRO0:{}",
-            m.aerobic_mito_count, m.hydrogenosome_count, m.mitosome_count, m.amiteukaryote_count
-        ),
+        sp_title,
         egui::FontId::proportional(12.5),
         egui::Color32::from_rgb(230, 240, 255),
     );
     painter.text(
         rect.left_top() + egui::vec2(8.0, 21.0),
         egui::Align2::LEFT_TOP,
-        "Teal=Hydro | Gold=MitoS(ISC) | Cyan=MRO0(SUF)",
+        sp_legend,
         egui::FontId::monospace(9.0),
         egui::Color32::from_rgb(142, 168, 212),
     );
@@ -2274,10 +2394,17 @@ fn paint_spatial_grid(
         }
 
         if show_labels && is_champ {
+            let champ_lbl = match world.organism {
+                OrganismKind::RnaDnaProtein => {
+                    format!("{} {}", unit.guild.short_code(), unit.mro_class.short_code())
+                }
+                OrganismKind::HominidPopulation => format!("Band {}", unit.species_id + 1),
+                OrganismKind::ArtificialIntelligence => format!("Agent {}", unit.species_id + 1),
+            };
             painter.text(
                 center + egui::vec2(0.0, -rad - 3.5),
                 egui::Align2::CENTER_BOTTOM,
-                format!("{} {}", unit.guild.short_code(), unit.mro_class.short_code()),
+                champ_lbl,
                 egui::FontId::monospace(9.5),
                 egui::Color32::WHITE,
             );
@@ -2424,7 +2551,7 @@ fn paint_scene_2d(
 pub fn run_gui(seed: u64) -> Result<(), String> {
     let viewport = egui::ViewportBuilder::default()
         .with_title(
-            "ITME v12.0 (v1.2.0) — Hydrogenosomes, Mitosomes (ISC), Apicoplasts & Symbiogenesis",
+            "ITME v23.0 — Domain-Isolated Biosphere, Hominid & AI Evolutionary Simulator",
         )
         .with_inner_size(egui::vec2(1600.0, 940.0))
         .with_min_inner_size(egui::vec2(980.0, 640.0))
@@ -2436,7 +2563,7 @@ pub fn run_gui(seed: u64) -> Result<(), String> {
     };
 
     eframe::run_native(
-        "ITME v12.0 Native Rust Simulation",
+        "ITME v23.0 Native Rust Simulation",
         options,
         Box::new(move |cc| Ok(Box::new(ItmeGuiApp::new(cc, seed)))),
     )
@@ -2449,113 +2576,74 @@ pub fn run_screenshot(out_path: &str, seed: u64, view_idx: u8) -> Result<(), Str
 
     match view_idx {
         1 => {
-            for world in &mut app.worlds {
-                world.mode = SimulationMode::OrganicSandbox;
-                world.apply_regime_preset(RegimeId::R20AutoadaptiveReplicative, false);
-                for _ in 0..10 {
-                    world.step();
-                }
-                world.apply_regime_preset(RegimeId::R30FullyDarwinian, true);
-                for _ in 0..14 {
-                    world.step();
-                }
-                world.apply_regime_preset(RegimeId::R30SoftInheritance, true);
-                for _ in 0..14 {
-                    world.step();
-                }
-                world.apply_regime_preset(RegimeId::R35Symbiogenetic, true);
-                for _ in 0..14 {
-                    world.step();
-                }
-                // Cultivate coexisting MRO grades (MRO->0, Mitosome, Hydrogenosome, AerobicMito),
-                // serial holobionts, apicoplast parasites, and kleptoplasty tipping points:
-                world.controls.cytosolic_suf_hgt_rescue = 0.72;
-                for _ in 0..2 {
-                    let _ = world.trigger_endosymbiotic_pulse();
-                }
-                for _ in 0..3 {
-                    let _ = world.trigger_mro_reduction_pulse();
-                }
-                for _ in 0..6 {
-                    world.step();
-                }
-                for _ in 0..2 {
-                    let _ = world.trigger_endosymbiotic_pulse();
-                }
-                for _ in 0..2 {
-                    let _ = world.trigger_mro_reduction_pulse();
-                }
-                for _ in 0..6 {
-                    world.step();
-                }
-                for _ in 0..2 {
-                    let _ = world.trigger_endosymbiotic_pulse();
-                }
-                let _ = world.trigger_serial_endosymbiosis_pulse();
-                let _ = world.trigger_klepto_steal_pulse();
-                let _ = world.trigger_apicoplast_reduction_pulse();
-                for _ in 0..22 {
-                    world.step();
-                }
-            }
-            app.viewport_layout = ViewportLayout::SpatialAndPhylogeny;
+            app.screen = AppScreen::MainMenu(MainMenuState {
+                mode: SimulationMode::GuidedCurriculum,
+                steps_per_stage: 32,
+                initial_regime: RegimeId::R35Symbiogenetic,
+                seed_text: seed.to_string(),
+                seed,
+            });
         }
         2 => {
-            let epochs = app.worlds[0].run_continuous_grand_trajectory(10);
-            if let Some(last_ep) = epochs.last() {
-                app.export_status = Some(format!(
-                    "Completed 8-Epoch 4.25 Ga Grand Trajectory -> {}: L_I = {:.2}, MI = {:.1}b, O2 = {:.2}, Exergy = {:.2}!",
-                    last_ep.epoch.code(),
-                    last_ep.informational_leverage_li,
-                    last_ep.heritable_mutual_info_bits,
-                    last_ep.planetary_o2,
-                    last_ep.planetary_exergy_budget
-                ));
+            let mut session = DomainSession::new(
+                OrganismKind::RnaDnaProtein,
+                RegimeId::R20AutoadaptiveReplicative,
+                SimulationMode::OrganicSandbox,
+                32,
+                seed,
+            );
+            for _ in 0..10 {
+                session.step_once();
             }
-            app.grand_epochs = epochs;
-            app.viewport_layout = ViewportLayout::GrandTrajectory;
+            session.jump_to_regime(RegimeId::R30FullyDarwinian);
+            for _ in 0..14 {
+                session.step_once();
+            }
+            session.jump_to_regime(RegimeId::R35Symbiogenetic);
+            session.world.controls.cytosolic_suf_hgt_rescue = 0.72;
+            for _ in 0..2 {
+                let _ = session.world.trigger_endosymbiotic_pulse();
+            }
+            for _ in 0..3 {
+                let _ = session.world.trigger_mro_reduction_pulse();
+            }
+            let _ = session.world.trigger_serial_endosymbiosis_pulse();
+            for _ in 0..20 {
+                session.step_once();
+            }
+            session.viewport_layout = ViewportLayout::SpatialAndPhylogeny;
+            session.paused = true;
+            app.screen = AppScreen::Simulation(Box::new(session));
         }
         3 => {
-            for (idx, world) in app.worlds.iter_mut().enumerate() {
-                if idx == 0 {
-                    world.mode = SimulationMode::OrganicSandbox;
-                    world.apply_regime_preset(RegimeId::R35Symbiogenetic, false);
-                    world.controls.cytosolic_suf_hgt_rescue = 0.72;
-                    for _ in 0..3 {
-                        let _ = world.trigger_endosymbiotic_pulse();
-                    }
-                    let _ = world.trigger_mro_reduction_pulse();
-                    let _ = world.trigger_serial_endosymbiosis_pulse();
-                    for _ in 0..24 {
-                        world.step();
-                    }
-                } else if idx == 1 {
-                    world.mode = SimulationMode::GuidedCurriculum;
-                    world.apply_regime_preset(RegimeId::R30SoftInheritance, false);
-                    for _ in 0..26 {
-                        world.step();
-                    }
-                } else {
-                    world.mode = SimulationMode::GuidedCurriculum;
-                    world.apply_regime_preset(RegimeId::R30PseudoSoftInheritance, false);
-                    for _ in 0..26 {
-                        world.step();
-                    }
-                }
+            let mut session = DomainSession::new(
+                OrganismKind::ArtificialIntelligence,
+                RegimeId::R30SoftInheritance,
+                SimulationMode::OrganicSandbox,
+                32,
+                seed + 202,
+            );
+            for _ in 0..12 {
+                session.step_once();
             }
-            app.viewport_layout = ViewportLayout::TriOrganism3D;
-            app.show_labels = false;
-            app.camera.yaw = 0.56;
-            app.camera.pitch = 0.30;
-            app.camera.zoom = 1.32;
+            session.jump_to_regime(RegimeId::R30PseudoSoftInheritance);
+            let _ = session.world.trigger_machine_synthesis_pulse();
+            for _ in 0..22 {
+                session.step_once();
+            }
+            session.viewport_layout = ViewportLayout::SpatialGridAnd3D;
+            session.camera.yaw = 0.54;
+            session.camera.pitch = 0.30;
+            session.camera.zoom = 1.25;
+            session.paused = true;
+            app.screen = AppScreen::Simulation(Box::new(session));
         }
         other => {
             return Err(format!(
-                "Unsupported --screenshot-view {other} (expected 1, 2, or 3)"
+                "Unsupported --screenshot-view {other} (expected 1 = Main Menu, 2 = Molecular Domain, 3 = AI Domain)"
             ));
         }
     }
-    app.paused = true;
     render_offscreen_png(&ctx, out_path, |c| app.draw_panels(c))
 }
 

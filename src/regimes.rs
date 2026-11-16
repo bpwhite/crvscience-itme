@@ -25,6 +25,7 @@ use crate::model::{
     CapabilityFlags, ContinuousPhaseCoords, DiagnosticVector, EnvironmentControls,
     PriceDecomposition,
 };
+use crate::organisms::OrganismKind;
 use std::fmt;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -104,6 +105,110 @@ impl RegimeId {
 
     pub fn full_title(self) -> String {
         format!("{} {}", self.code(), self.name())
+    }
+
+    pub fn domain_name(self, org: OrganismKind) -> &'static str {
+        match org {
+            OrganismKind::RnaDnaProtein => match self {
+                Self::R00Static => "Thermal Prebiotic Equilibrium",
+                Self::R05Decaying => "Hydrolytic Oligomer Decay",
+                Self::R10AdaptiveDissipation => "Vent-Driven Dissipative Chemistry",
+                Self::R15Autoadaptive => "Allosteric Folding Plasticity",
+                Self::R15Replicative => "Template-Directed RNA/DNA Copying",
+                Self::R20InteractiveReplicative => "Ribozymic Resource Competition",
+                Self::R20AutoadaptiveReplicative => "Baldwinian Fold-Coupled Replication",
+                Self::R20ProtoDarwinian => "Quasispecies Error Catastrophe",
+                Self::R30FullyDarwinian => "RNR T-DNA + SGC Darwinian LUCA",
+                Self::R30SoftInheritance => "Communal HGT Progenote Network",
+                Self::R35Symbiogenetic => "1°/2°/3° Endosymbiosis & MRO/Apicoplast",
+                Self::R30PseudoDarwinian => "Directed Ribozyme & Minimal Cell",
+                Self::R30PseudoSoftInheritance => "Clonal Germ-Soma & SUF Amiteukaryote",
+            },
+            OrganismKind::HominidPopulation => match self {
+                Self::R00Static => "Dormant Lithic & Camp Cache",
+                Self::R05Decaying => "Foraging Band Attrition & Loss",
+                Self::R10AdaptiveDissipation => "Base-Camp Hearth Provisioning",
+                Self::R15Autoadaptive => "Individual Knapping Plasticity",
+                Self::R15Replicative => "Band Fissioning & Kin Dispersal",
+                Self::R20InteractiveReplicative => "Inter-Band Catchment Competition",
+                Self::R20AutoadaptiveReplicative => "Behavioral Niche Foraging",
+                Self::R20ProtoDarwinian => "Skill Drift & Cultural Treadmill",
+                Self::R30FullyDarwinian => "Kin Division & Lithic Guilds",
+                Self::R30SoftInheritance => "Cumulative Symbolic Teaching & Ratchet",
+                Self::R35Symbiogenetic => "Agro-Ectosymbiosis & Hearth Crops",
+                Self::R30PseudoDarwinian => "Institutional Craft Standardization",
+                Self::R30PseudoSoftInheritance => "Written Archives & Peer-Verified Guilds",
+            },
+            OrganismKind::ArtificialIntelligence => match self {
+                Self::R00Static => "Unpowered Silicon Cluster",
+                Self::R05Decaying => "Weight Bit-Rot & Forgetting",
+                Self::R10AdaptiveDissipation => "Single-Node Compute Load-Balancing",
+                Self::R15Autoadaptive => "In-Context / LoRA Activation Plasticity",
+                Self::R15Replicative => "Stateless Container & Checkpoint Forking",
+                Self::R20InteractiveReplicative => "Shared-KV & Compute-Quota Contention",
+                Self::R20AutoadaptiveReplicative => "Online Test-Time RL & Weight Update",
+                Self::R20ProtoDarwinian => "Synthetic Model Collapse (Habsburg AI)",
+                Self::R30FullyDarwinian => "Adversarial Arena & Population Training",
+                Self::R30SoftInheritance => "Teacher-Student Distillation & Vector Caches",
+                Self::R35Symbiogenetic => "Composable Tool-Use & Compute Enclaves",
+                Self::R30PseudoDarwinian => "RLHF & Reward-Shaping Pipeline",
+                Self::R30PseudoSoftInheritance => "Formal Proof-Verifier & Self-Distilling Steward",
+            },
+        }
+    }
+
+    pub fn domain_title(self, org: OrganismKind) -> String {
+        format!("{} {}", self.code(), self.domain_name(org))
+    }
+
+    pub fn domain_concept(self, org: OrganismKind) -> &'static str {
+        match org {
+            OrganismKind::RnaDnaProtein => match self {
+                Self::R00Static => "Zero net chemical flux across hydrothermal pore or lipid boundary",
+                Self::R05Decaying => "Phosphodiester hydrolysis and deamination outpace ligation work",
+                Self::R10AdaptiveDissipation => "Alkaline FeNiS delta-pH and wet-dry cycling drive prebiotic chemistry",
+                Self::R15Autoadaptive => "Reversible macromolecular folding tunes catalytic substrate binding",
+                Self::R15Replicative => "Template polymerization builds clonal nucleic strands without crowding",
+                Self::R20InteractiveReplicative => "Zero-mutation ribozyme clones compete for activated monomers",
+                Self::R20AutoadaptiveReplicative => "Plastic allosteric states stabilize nascent protocell catalysis",
+                Self::R20ProtoDarwinian => "Copy errors exceed Eigen's bound, dissolving functional genetic memory",
+                Self::R30FullyDarwinian => "D-RNA/L-AA chirality, SGC translation, RNR T-DNA & UDG repair stabilize LUCA",
+                Self::R30SoftInheritance => "High horizontal gene transfer and syntrophic H2 cross-feeding",
+                Self::R35Symbiogenetic => "1°/2°/3° endosymbiosis, anaerobic hydrogenosomes/mitosomes (ISC) & apicoplasts",
+                Self::R30PseudoDarwinian => "Directed selection sculps multi-trophic organelle & viral polymerases",
+                Self::R30PseudoSoftInheritance => "Clonal germ-soma policing and cytosolic SUF HGT rescue (MRO->0)",
+            },
+            OrganismKind::HominidPopulation => match self {
+                Self::R00Static => "Unused stone blanks and cold hearths with zero caloric turnover",
+                Self::R05Decaying => "Foraging caloric deficit erodes band size and craft transmission",
+                Self::R10AdaptiveDissipation => "Central-place hearth provisioning stabilizes local camp energetics",
+                Self::R15Autoadaptive => "Individual motor practice refines Levallois flake ergonomics in a lifetime",
+                Self::R15Replicative => "Foraging bands fission along kin lines into open territorial habitats",
+                Self::R20InteractiveReplicative => "Adjacent bands compete over bounded seasonal watershed catchments",
+                Self::R20AutoadaptiveReplicative => "Dietary breadth and seasonal tool switching buffer ecological shocks",
+                Self::R20ProtoDarwinian => "Social transmission errors exceed demographic retention, losing crafts",
+                Self::R30FullyDarwinian => "Kin-structured division of labor and inter-band lithic trade networks",
+                Self::R30SoftInheritance => "High-fidelity symbolic pedagogy + partial deme connectivity drive ratchets",
+                Self::R35Symbiogenetic => "Managed cultivar mutualisms paired with defensive microbiome/hearth care",
+                Self::R30PseudoDarwinian => "Normative craft guilds enforce standardized tool & subsistence templates",
+                Self::R30PseudoSoftInheritance => "External written archives + peer replication audits offload cognitive memory",
+            },
+            OrganismKind::ArtificialIntelligence => match self {
+                Self::R00Static => "Powered-down accelerator racks with zero tensor ops or entropy flow",
+                Self::R05Decaying => "Bit-flip drift and ungrounded updates erode policy accuracy over time",
+                Self::R10AdaptiveDissipation => "Thermal-dissipative scheduling balances inference across compute nodes",
+                Self::R15Autoadaptive => "Single model adapts LoRA weights and KV cache via online feedback",
+                Self::R15Replicative => "Deterministic container cloning scales checkpoint weights across free GPUs",
+                Self::R20InteractiveReplicative => "Identical worker containers contend for shared VRAM, bandwidth & batch quota",
+                Self::R20AutoadaptiveReplicative => "Test-time search & episodic memory adaptation raise rollout survival",
+                Self::R20ProtoDarwinian => "Unverified synthetic recursion collapses tail diversity (Eigen/Shumailov cliff)",
+                Self::R30FullyDarwinian => "Population-based training & adversarial arenas co-evolve diverse policies",
+                Self::R30SoftInheritance => "Multi-teacher distillation + shared vector memory transfer learned priors",
+                Self::R35Symbiogenetic => "Neural core fused with sandboxed compilers, retrieval & enclave tools",
+                Self::R30PseudoDarwinian => "External reward models and verifiable tasks shape population specialization",
+                Self::R30PseudoSoftInheritance => "Formal proof verifiers + empirical grounding floor lock out model collapse",
+            },
+        }
     }
 
     pub fn core_concept(self) -> &'static str {
@@ -416,6 +521,173 @@ impl RegimeId {
                 ..EnvironmentControls::default()
             },
         }
+    }
+
+    /// Domain-isolated control presets keeping Molecular organelle chemistry, Hominid cultural
+    /// evolution, and AI compute verification strictly separate with zero cross-domain leakage.
+    pub fn domain_preset_controls(self, org: OrganismKind) -> EnvironmentControls {
+        let mut c = self.preset_controls();
+        match org {
+            OrganismKind::RnaDnaProtein => {
+                c.symbolic_teaching_fidelity = 0.0;
+                c.inter_deme_connectivity = 0.0;
+                c.cultural_innovation_rate = 0.0;
+                c.archival_externalization_rate = 0.0;
+                c.peer_verification_rigor = 0.0;
+                c.unverified_publish_pressure = 0.0;
+                c.synthetic_generation_rate = 0.0;
+                c.formal_verifier_strictness = 0.0;
+                c.empirical_grounding_floor = 0.0;
+                c.crop_domestication_rate = 0.0;
+                c.agro_pathogen_pressure = 0.0;
+                c.defensive_symbiont_potency = 0.0;
+                c.queen_monogamy_index = 0.0;
+                c.eusocial_caste_canalization_rate = 0.0;
+                c.worker_policing_rate = 0.0;
+                if matches!(self, Self::R10AdaptiveDissipation | Self::R15Autoadaptive | Self::R15Replicative) {
+                    c.hadean_abiogenesis_mode = true;
+                    c.wet_dry_cycle_amplitude = 0.65;
+                    c.hydrothermal_delta_ph = 3.2;
+                    c.citrate_mg_chelation = 0.70;
+                    c.ribozyme_polymerase_fidelity = 0.86;
+                } else if matches!(self, Self::R30FullyDarwinian | Self::R30SoftInheritance) {
+                    c.hadean_abiogenesis_mode = true;
+                    c.chiral_symmetry_breaking_mode = true;
+                    c.rna_to_dna_virosphere_mode = true;
+                    c.magnetite_ciss_spin_bias = 0.78;
+                    c.minihelix_chiral_selectivity = 0.85;
+                    c.communal_code_hgt_rate = 0.68;
+                    c.rnr_thiyl_radical_activity = 0.82;
+                    c.thymidylate_udg_repair_efficiency = 0.88;
+                    c.virosphere_arms_race_coupling = 0.74;
+                }
+            }
+            OrganismKind::HominidPopulation => {
+                c.kleptoplasty_rate = 0.0;
+                c.klepto_hgt_rate = 0.0;
+                c.endosymbiosis_rate = 0.0;
+                c.egt_rate = 0.0;
+                c.serial_endosymbiosis_rate = 0.0;
+                c.nucleomorph_reduction_rate = 0.0;
+                c.apicoplast_reduction_rate = 0.0;
+                c.host_metabolite_rescue = 0.0;
+                c.anaerobic_mro_reduction_rate = 0.0;
+                c.cytosolic_suf_hgt_rescue = 0.0;
+                c.synthetic_generation_rate = 0.0;
+                c.formal_verifier_strictness = 0.0;
+                c.empirical_grounding_floor = 0.0;
+                c.rnr_thiyl_radical_activity = 0.0;
+                c.thymidylate_udg_repair_efficiency = 0.0;
+                c.virosphere_arms_race_coupling = 0.0;
+                c.magnetite_ciss_spin_bias = 0.0;
+                c.minihelix_chiral_selectivity = 0.0;
+                c.communal_code_hgt_rate = 0.0;
+                c.wet_dry_cycle_amplitude = 0.0;
+                c.hydrothermal_delta_ph = 0.0;
+                c.citrate_mg_chelation = 0.0;
+                c.ribozyme_polymerase_fidelity = 0.0;
+                c.hadean_abiogenesis_mode = false;
+                c.chiral_symmetry_breaking_mode = false;
+                c.rna_to_dna_virosphere_mode = false;
+                c.multicellular_adhesion_rate = 0.0;
+                c.germ_soma_differentiation_rate = 0.0;
+                c.apoptosis_policing_rate = 0.0;
+                c.queen_monogamy_index = 0.0;
+                c.eusocial_caste_canalization_rate = 0.0;
+                c.worker_policing_rate = 0.0;
+                c.crop_domestication_rate = 0.0;
+                c.agro_pathogen_pressure = 0.0;
+                c.defensive_symbiont_potency = 0.0;
+                c.symbolic_teaching_fidelity = 0.0;
+                c.inter_deme_connectivity = 0.0;
+                c.cultural_innovation_rate = 0.0;
+                c.archival_externalization_rate = 0.0;
+                c.peer_verification_rigor = 0.0;
+                c.unverified_publish_pressure = 0.0;
+                if matches!(self, Self::R30SoftInheritance | Self::R35Symbiogenetic | Self::R30PseudoDarwinian | Self::R30PseudoSoftInheritance) {
+                    c.symbolic_teaching_fidelity = 0.90;
+                    c.inter_deme_connectivity = 0.35;
+                    c.cultural_innovation_rate = 0.54;
+                }
+                if matches!(self, Self::R35Symbiogenetic | Self::R30PseudoSoftInheritance) {
+                    c.crop_domestication_rate = 0.56;
+                    c.agro_pathogen_pressure = 0.32;
+                    c.defensive_symbiont_potency = 0.80;
+                }
+                if matches!(self, Self::R30PseudoDarwinian | Self::R30PseudoSoftInheritance) {
+                    c.archival_externalization_rate = 0.68;
+                    c.peer_verification_rigor = 0.86;
+                    c.unverified_publish_pressure = 0.25;
+                }
+            }
+            OrganismKind::ArtificialIntelligence => {
+                c.kleptoplasty_rate = 0.0;
+                c.klepto_hgt_rate = 0.0;
+                c.endosymbiosis_rate = 0.0;
+                c.egt_rate = 0.0;
+                c.serial_endosymbiosis_rate = 0.0;
+                c.nucleomorph_reduction_rate = 0.0;
+                c.apicoplast_reduction_rate = 0.0;
+                c.host_metabolite_rescue = 0.0;
+                c.anaerobic_mro_reduction_rate = 0.0;
+                c.cytosolic_suf_hgt_rescue = 0.0;
+                c.multicellular_adhesion_rate = 0.0;
+                c.germ_soma_differentiation_rate = 0.0;
+                c.apoptosis_policing_rate = 0.0;
+                c.queen_monogamy_index = 0.0;
+                c.eusocial_caste_canalization_rate = 0.0;
+                c.worker_policing_rate = 0.0;
+                c.crop_domestication_rate = 0.0;
+                c.agro_pathogen_pressure = 0.0;
+                c.defensive_symbiont_potency = 0.0;
+                c.symbolic_teaching_fidelity = 0.0;
+                c.inter_deme_connectivity = 0.0;
+                c.cultural_innovation_rate = 0.0;
+                c.rnr_thiyl_radical_activity = 0.0;
+                c.thymidylate_udg_repair_efficiency = 0.0;
+                c.virosphere_arms_race_coupling = 0.0;
+                c.magnetite_ciss_spin_bias = 0.0;
+                c.minihelix_chiral_selectivity = 0.0;
+                c.communal_code_hgt_rate = 0.0;
+                c.wet_dry_cycle_amplitude = 0.0;
+                c.hydrothermal_delta_ph = 0.0;
+                c.citrate_mg_chelation = 0.0;
+                c.ribozyme_polymerase_fidelity = 0.0;
+                c.hadean_abiogenesis_mode = false;
+                c.chiral_symmetry_breaking_mode = false;
+                c.rna_to_dna_virosphere_mode = false;
+                c.synthetic_generation_rate = 0.0;
+                c.formal_verifier_strictness = 0.0;
+                c.empirical_grounding_floor = 0.0;
+                c.archival_externalization_rate = 0.0;
+                c.peer_verification_rigor = 0.0;
+                c.unverified_publish_pressure = 0.0;
+                match self {
+                    Self::R20ProtoDarwinian => {
+                        c.synthetic_generation_rate = 0.85;
+                        c.formal_verifier_strictness = 0.08;
+                        c.empirical_grounding_floor = 0.02;
+                    }
+                    Self::R30SoftInheritance | Self::R35Symbiogenetic => {
+                        c.synthetic_generation_rate = 0.52;
+                        c.formal_verifier_strictness = 0.78;
+                        c.empirical_grounding_floor = 0.28;
+                        c.archival_externalization_rate = 0.56;
+                        c.peer_verification_rigor = 0.76;
+                    }
+                    Self::R30PseudoDarwinian | Self::R30PseudoSoftInheritance => {
+                        c.synthetic_generation_rate = 0.70;
+                        c.formal_verifier_strictness = 0.92;
+                        c.empirical_grounding_floor = 0.36;
+                        c.archival_externalization_rate = 0.68;
+                        c.peer_verification_rigor = 0.88;
+                        c.unverified_publish_pressure = 0.22;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        c
     }
 
     pub fn outgoing_transitions(self) -> &'static [(RegimeId, &'static str, f64)] {
