@@ -1,3 +1,18 @@
+// Copyright (C) 2026 CRV Science Network (https://crvscience.com)
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://gnu.org>.
+
 //! Native desktop GUI mode built with `eframe` / `egui` (`0.29`) — ITME v12.0 (`v1.2.0`).
 //!
 //! Features live real-time **Anaerobic Mitochondrial Reduction (`Mito->Hydro->MitoS->MRO->0`) + Apicoplasts + Kleptoplasty**:
@@ -7,7 +22,11 @@
 
 use crate::engine::{SimulationMode, SimulationWorld};
 use crate::geometry::{Camera3D, StructureScene};
-use crate::model::{AbiogenesisStage, AgricultureState, ChiralityCodeStage, CulturalState, EusocialState, ExosomaticState, GenomeSubstrateStage, MachineSynthesisState, MroClass, MulticellularState, OrderPhase, PlanetaryState, TrophicGuild};
+use crate::model::{
+    AbiogenesisStage, AgricultureState, ChiralityCodeStage, CulturalState, EusocialState,
+    ExosomaticState, GenomeSubstrateStage, GrandTrajectoryEpochSummary, MachineSynthesisState,
+    MroClass, MulticellularState, OrderPhase, PlanetaryState, TrophicGuild,
+};
 use crate::organisms::OrganismKind;
 use crate::regimes::RegimeId;
 use eframe::{egui, App};
@@ -33,6 +52,7 @@ enum ViewportLayout {
     Perspective3D,
     Blueprint2D,
     TriOrganism3D,
+    GrandTrajectory,
 }
 
 pub struct ItmeGuiApp {
@@ -46,14 +66,19 @@ pub struct ItmeGuiApp {
     steps_per_second: f32,
     last_step_instant: Instant,
     export_status: Option<String>,
+    grand_epochs: Vec<GrandTrajectoryEpochSummary>,
 }
 
 impl ItmeGuiApp {
     pub fn new(cc: &eframe::CreationContext<'_>, seed: u64) -> Self {
+        Self::new_with_ctx(&cc.egui_ctx, seed)
+    }
+
+    fn new_with_ctx(ctx: &egui::Context, seed: u64) -> Self {
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = egui::Color32::from_rgb(13, 18, 32);
         visuals.window_fill = egui::Color32::from_rgb(16, 22, 38);
-        cc.egui_ctx.set_visuals(visuals);
+        ctx.set_visuals(visuals);
 
         let worlds = [
             SimulationWorld::new(
@@ -90,6 +115,7 @@ impl ItmeGuiApp {
             steps_per_second: 8.0,
             last_step_instant: Instant::now(),
             export_status: None,
+            grand_epochs: Vec::new(),
         }
     }
 
@@ -158,15 +184,18 @@ impl App for ItmeGuiApp {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
 
+        self.draw_panels(ctx);
+    }
+}
+
+impl ItmeGuiApp {
+    fn draw_panels(&mut self, ctx: &egui::Context) {
         self.draw_top_toolbar(ctx);
         self.draw_left_controls(ctx);
         self.draw_right_inspector(ctx);
         self.draw_bottom_telemetry_plots(ctx);
         self.draw_central_viewport(ctx);
     }
-}
-
-impl ItmeGuiApp {
     fn draw_top_toolbar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("itme_top_bar").show(ctx, |ui| {
             ui.add_space(4.0);
@@ -194,6 +223,8 @@ impl ItmeGuiApp {
                 }
                 if ui.button("4.25 Ga -> Gaia-2.0 Grand Run!").clicked() {
                     let epochs = self.active_world_mut().run_continuous_grand_trajectory(10);
+                    self.grand_epochs = epochs.clone();
+                    self.viewport_layout = ViewportLayout::GrandTrajectory;
                     if let Some(last_ep) = epochs.last() {
                         self.export_status = Some(format!(
                             "Completed 8-Epoch 4.25 Ga Grand Trajectory -> {}: L_I = {:.2}, MI = {:.1}b, O2 = {:.2}, Exergy = {:.2}!",
@@ -409,6 +440,11 @@ impl ItmeGuiApp {
                     &mut self.viewport_layout,
                     ViewportLayout::TriOrganism3D,
                     "All 3 Organisms",
+                );
+                ui.selectable_value(
+                    &mut self.viewport_layout,
+                    ViewportLayout::GrandTrajectory,
+                    "4.25 Ga Timeline",
                 );
 
                 ui.separator();
@@ -1094,7 +1130,12 @@ impl ItmeGuiApp {
                     egui::Color32::from_rgb(175, 190, 220),
                 );
 
-                let max_right = 10.0_f32;
+                let max_right = w
+                    .history
+                    .iter()
+                    .map(|m| m.hydrogenosome_count.max(m.mitosome_count) as f32)
+                    .fold(10.0_f32, f32::max)
+                    * 1.15;
                 draw_series(
                     &painter,
                     right_plot,
@@ -1116,7 +1157,7 @@ impl ItmeGuiApp {
                 painter.text(
                     right_plot.left_top() + egui::vec2(6.0, 4.0),
                     egui::Align2::LEFT_TOP,
-                    "Hydrogenosome (H2+ISC) & Mitosome (ISC-Only) Lineage Counts",
+                    format!("Hydrogenosomes & Mitosomes [0 .. {:.0}]", max_right),
                     egui::FontId::monospace(10.5),
                     egui::Color32::from_rgb(175, 190, 220),
                 );
@@ -1220,6 +1261,16 @@ impl ItmeGuiApp {
                     paint_scene_2d(&painter, full_rect.shrink(6.0), &scene, self.show_labels);
                 }
                 ViewportLayout::TriOrganism3D => {
+                    let titles = [
+                        "1. RNA / DNA / Protein",
+                        "2. Hominid Population",
+                        "3. AI Systems",
+                    ];
+                    let subtitles = [
+                        "Symbiogenetic Cell & Organelle Continuum",
+                        "Biocultural Niche & Exosomatic Coupling",
+                        "Hierarchical Attention & World-Model Graph",
+                    ];
                     let third = full_rect.width() / 3.0;
                     for i in 0..3 {
                         let sub = egui::Rect::from_min_max(
@@ -1239,18 +1290,552 @@ impl ItmeGuiApp {
                             egui::Color32::from_rgb(11, 16, 30),
                             egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(38, 54, 90)),
                         );
+                        let sub_p = painter.with_clip_rect(sub.shrink(1.0));
                         let scene = self.worlds[i].current_scene();
+                        let p_sum = self.worlds[i].phylo_summary();
+
+                        sub_p.rect_filled(
+                            egui::Rect::from_min_max(
+                                sub.left_top(),
+                                egui::pos2(sub.right(), sub.top() + 42.0),
+                            ),
+                            0.0,
+                            egui::Color32::from_rgb(15, 23, 42),
+                        );
+                        sub_p.text(
+                            sub.left_top() + egui::vec2(10.0, 6.0),
+                            egui::Align2::LEFT_TOP,
+                            titles[i],
+                            egui::FontId::proportional(13.0),
+                            egui::Color32::from_rgb(230, 240, 255),
+                        );
+                        sub_p.text(
+                            sub.left_top() + egui::vec2(10.0, 24.0),
+                            egui::Align2::LEFT_TOP,
+                            subtitles[i],
+                            egui::FontId::proportional(10.5),
+                            egui::Color32::from_rgb(125, 211, 252),
+                        );
+                        sub_p.line_segment(
+                            [
+                                egui::pos2(sub.left(), sub.top() + 42.0),
+                                egui::pos2(sub.right(), sub.top() + 42.0),
+                            ],
+                            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(38, 54, 90)),
+                        );
+
+                        let scene_rect = egui::Rect::from_min_max(
+                            egui::pos2(sub.left() + 4.0, sub.top() + 44.0),
+                            egui::pos2(sub.right() - 4.0, sub.bottom() - 28.0),
+                        );
+                        let scene_p = sub_p.with_clip_rect(scene_rect);
                         paint_scene_3d(
-                            &painter,
-                            sub.shrink(4.0),
+                            &scene_p,
+                            scene_rect,
                             &scene,
                             &self.camera,
                             self.show_labels,
                         );
+
+                        sub_p.line_segment(
+                            [
+                                egui::pos2(sub.left(), sub.bottom() - 26.0),
+                                egui::pos2(sub.right(), sub.bottom() - 26.0),
+                            ],
+                            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(38, 54, 90)),
+                        );
+                        sub_p.text(
+                            egui::pos2(sub.left() + 10.0, sub.bottom() - 13.0),
+                            egui::Align2::LEFT_CENTER,
+                            format!(
+                                "Nodes:{} | Edges:{} | MRCA:N{} | #H:{}",
+                                scene.nodes_3d.len(),
+                                scene.edges_3d.len(),
+                                p_sum.mrca_id,
+                                p_sum.endosymbiotic_fusions
+                            ),
+                            egui::FontId::monospace(9.0),
+                            egui::Color32::from_rgb(148, 163, 184),
+                        );
                     }
+                }
+                ViewportLayout::GrandTrajectory => {
+                    self.paint_grand_trajectory_viewport(&painter, full_rect);
                 }
             }
         });
+    }
+
+    fn paint_grand_trajectory_viewport(&self, painter: &egui::Painter, full_rect: egui::Rect) {
+        let panel_rect = full_rect.shrink(4.0);
+        paint_framed_box(
+            painter,
+            panel_rect,
+            6.0,
+            egui::Color32::from_rgb(11, 16, 30),
+            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(38, 54, 90)),
+        );
+        let painter = &painter.with_clip_rect(panel_rect.shrink(2.0));
+
+        if self.grand_epochs.is_empty() {
+            painter.text(
+                panel_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Click '4.25 Ga -> Gaia-2.0 Grand Run!' in the top bar to execute the 8-Epoch Evolutionary Trajectory.",
+                egui::FontId::proportional(14.0),
+                egui::Color32::from_rgb(148, 163, 184),
+            );
+            return;
+        }
+
+        let last = self.grand_epochs.last().unwrap();
+        painter.text(
+            panel_rect.left_top() + egui::vec2(12.0, 9.0),
+            egui::Align2::LEFT_TOP,
+            "4.25 Ga -> Gaia-2.0 Continuous Trajectory",
+            egui::FontId::proportional(13.0),
+            egui::Color32::from_rgb(230, 240, 255),
+        );
+        painter.text(
+            panel_rect.right_top() + egui::vec2(-12.0, 10.0),
+            egui::Align2::RIGHT_TOP,
+            format!(
+                "Final: Ch:{}/5 | MI:{:.1}b | L_I:{:.2} | O2:{:.3} | CO2:{:.0} ppm",
+                last.heritable_channels_active,
+                last.heritable_mutual_info_bits,
+                last.informational_leverage_li,
+                last.planetary_o2,
+                last.planetary_co2_ppm
+            ),
+            egui::FontId::monospace(10.0),
+            egui::Color32::from_rgb(125, 211, 252),
+        );
+
+        let content = egui::Rect::from_min_max(
+            egui::pos2(panel_rect.left() + 8.0, panel_rect.top() + 34.0),
+            egui::pos2(panel_rect.right() - 8.0, panel_rect.bottom() - 8.0),
+        );
+        let charts_h = (content.height() * 0.50).max(200.0);
+        let charts_rect = egui::Rect::from_min_max(
+            content.left_top(),
+            egui::pos2(content.right(), content.top() + charts_h),
+        );
+        let table_rect = egui::Rect::from_min_max(
+            egui::pos2(content.left(), charts_rect.bottom() + 8.0),
+            content.right_bottom(),
+        );
+
+        let mid_x = charts_rect.center().x;
+        let left_chart = egui::Rect::from_min_max(
+            charts_rect.left_top(),
+            egui::pos2(mid_x - 5.0, charts_rect.bottom()),
+        );
+        let right_chart = egui::Rect::from_min_max(
+            egui::pos2(mid_x + 5.0, charts_rect.top()),
+            charts_rect.right_bottom(),
+        );
+
+        let n = self.grand_epochs.len();
+        let draw_epoch_axis = |p: &egui::Painter, plot: egui::Rect| {
+            for (idx, ep) in self.grand_epochs.iter().enumerate() {
+                let frac = if n <= 1 {
+                    0.5
+                } else {
+                    idx as f32 / (n - 1) as f32
+                };
+                let x = plot.left() + frac * plot.width();
+                p.line_segment(
+                    [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
+                    egui::Stroke::new(0.8_f32, egui::Color32::from_rgb(30, 41, 68)),
+                );
+                let age_lbl = if ep.geologic_age_ga >= 0.5 {
+                    format!("E{}\n{:.1}G", idx + 1, ep.geologic_age_ga)
+                } else if ep.geologic_age_ga > 0.0 {
+                    format!("E{}\n{:.0}M", idx + 1, ep.geologic_age_ga * 1000.0)
+                } else {
+                    format!("E{}\n0G", idx + 1)
+                };
+                p.text(
+                    egui::pos2(x, plot.bottom() + 4.0),
+                    egui::Align2::CENTER_TOP,
+                    age_lbl,
+                    egui::FontId::monospace(8.5),
+                    egui::Color32::from_rgb(148, 163, 184),
+                );
+            }
+        };
+
+        // Panel A: Atmospheric O2 & log10(CO2 ppm)
+        paint_framed_box(
+            painter,
+            left_chart,
+            5.0,
+            egui::Color32::from_rgb(15, 22, 39),
+            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(45, 65, 105)),
+        );
+        {
+            let p = painter.with_clip_rect(left_chart);
+            p.text(
+                left_chart.left_top() + egui::vec2(10.0, 6.0),
+                egui::Align2::LEFT_TOP,
+                "Panel A | Atmosphere: Free O2 (Cyan) & log10(CO2) (Amber)",
+                egui::FontId::proportional(10.5),
+                egui::Color32::from_rgb(226, 232, 240),
+            );
+            let plot = egui::Rect::from_min_max(
+                egui::pos2(left_chart.left() + 46.0, left_chart.top() + 28.0),
+                egui::pos2(left_chart.right() - 44.0, left_chart.bottom() - 32.0),
+            );
+            let max_o2 = self
+                .grand_epochs
+                .iter()
+                .map(|e| e.planetary_o2)
+                .fold(0.25_f64, f64::max)
+                * 1.18;
+            let log_co2s: Vec<f64> = self
+                .grand_epochs
+                .iter()
+                .map(|e| e.planetary_co2_ppm.max(1.0).log10())
+                .collect();
+            let min_lc = log_co2s.iter().copied().fold(f64::INFINITY, f64::min).min(2.0);
+            let max_lc = log_co2s
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max)
+                .max(min_lc + 1.0);
+            for k in 0..=4 {
+                let frac = k as f32 / 4.0;
+                let y = plot.bottom() - frac * plot.height();
+                p.line_segment(
+                    [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
+                    egui::Stroke::new(0.8_f32, egui::Color32::from_rgb(30, 41, 68)),
+                );
+                p.text(
+                    egui::pos2(plot.left() - 6.0, y),
+                    egui::Align2::RIGHT_CENTER,
+                    format!("{:.2}", max_o2 * frac as f64),
+                    egui::FontId::monospace(8.5),
+                    egui::Color32::from_rgb(76, 201, 240),
+                );
+                p.text(
+                    egui::pos2(plot.right() + 6.0, y),
+                    egui::Align2::LEFT_CENTER,
+                    format!("{:.1}", min_lc + (max_lc - min_lc) * frac as f64),
+                    egui::FontId::monospace(8.5),
+                    egui::Color32::from_rgb(244, 162, 97),
+                );
+            }
+            draw_epoch_axis(&p, plot);
+
+            let o2_pts: Vec<egui::Pos2> = self
+                .grand_epochs
+                .iter()
+                .enumerate()
+                .map(|(i, ep)| {
+                    let fx = if n <= 1 { 0.5 } else { i as f32 / (n - 1) as f32 };
+                    let fy = (ep.planetary_o2 / max_o2).clamp(0.0, 1.0) as f32;
+                    egui::pos2(plot.left() + fx * plot.width(), plot.bottom() - fy * plot.height())
+                })
+                .collect();
+            let co2_pts: Vec<egui::Pos2> = log_co2s
+                .iter()
+                .enumerate()
+                .map(|(i, &lc)| {
+                    let fx = if n <= 1 { 0.5 } else { i as f32 / (n - 1) as f32 };
+                    let fy = ((lc - min_lc) / (max_lc - min_lc)).clamp(0.0, 1.0) as f32;
+                    egui::pos2(plot.left() + fx * plot.width(), plot.bottom() - fy * plot.height())
+                })
+                .collect();
+            p.add(egui::Shape::line(
+                co2_pts.clone(),
+                egui::Stroke::new(2.2_f32, egui::Color32::from_rgb(244, 162, 97)),
+            ));
+            p.add(egui::Shape::line(
+                o2_pts.clone(),
+                egui::Stroke::new(2.4_f32, egui::Color32::from_rgb(76, 201, 240)),
+            ));
+            for (i, pt) in o2_pts.iter().enumerate() {
+                p.circle_filled(*pt, 3.8, egui::Color32::from_rgb(76, 201, 240));
+                if i == 3 {
+                    p.text(
+                        *pt + egui::vec2(0.0, -9.0),
+                        egui::Align2::CENTER_BOTTOM,
+                        format!("O2:{:.2}", self.grand_epochs[i].planetary_o2),
+                        egui::FontId::monospace(8.5),
+                        egui::Color32::from_rgb(186, 230, 253),
+                    );
+                } else if i == n - 1 {
+                    p.text(
+                        *pt + egui::vec2(-6.0, -7.0),
+                        egui::Align2::RIGHT_BOTTOM,
+                        format!("O2:{:.2}", self.grand_epochs[i].planetary_o2),
+                        egui::FontId::monospace(8.5),
+                        egui::Color32::from_rgb(186, 230, 253),
+                    );
+                }
+            }
+            for (i, pt) in co2_pts.iter().enumerate() {
+                p.circle_filled(*pt, 3.5, egui::Color32::from_rgb(244, 162, 97));
+                if i == 0 || i == n - 1 {
+                    p.text(
+                        *pt + egui::vec2(if i == 0 { 16.0 } else { -12.0 }, 8.0),
+                        egui::Align2::CENTER_TOP,
+                        format!("{:.0}ppm", self.grand_epochs[i].planetary_co2_ppm),
+                        egui::FontId::monospace(8.5),
+                        egui::Color32::from_rgb(253, 186, 116),
+                    );
+                }
+            }
+        }
+
+        // Panel B: 5-Channel Heritable Mutual Information, Leverage L_I & Active Channels
+        paint_framed_box(
+            painter,
+            right_chart,
+            5.0,
+            egui::Color32::from_rgb(15, 22, 39),
+            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(45, 65, 105)),
+        );
+        {
+            let p = painter.with_clip_rect(right_chart);
+            p.text(
+                right_chart.left_top() + egui::vec2(10.0, 6.0),
+                egui::Align2::LEFT_TOP,
+                "Panel B | MI (Green), L_I (Violet) & Active Ch (Gold)",
+                egui::FontId::proportional(10.5),
+                egui::Color32::from_rgb(226, 232, 240),
+            );
+            let plot = egui::Rect::from_min_max(
+                egui::pos2(right_chart.left() + 46.0, right_chart.top() + 28.0),
+                egui::pos2(right_chart.right() - 44.0, right_chart.bottom() - 32.0),
+            );
+            let max_mi = self
+                .grand_epochs
+                .iter()
+                .map(|e| e.heritable_mutual_info_bits)
+                .fold(10.0_f64, f64::max)
+                * 1.24;
+            let max_li = self
+                .grand_epochs
+                .iter()
+                .map(|e| e.informational_leverage_li)
+                .fold(1.0_f64, f64::max)
+                * 1.24;
+            for k in 0..=4 {
+                let frac = k as f32 / 4.0;
+                let y = plot.bottom() - frac * plot.height();
+                p.line_segment(
+                    [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
+                    egui::Stroke::new(0.8_f32, egui::Color32::from_rgb(30, 41, 68)),
+                );
+                p.text(
+                    egui::pos2(plot.left() - 6.0, y),
+                    egui::Align2::RIGHT_CENTER,
+                    format!("{:.0}b", max_mi * frac as f64),
+                    egui::FontId::monospace(8.5),
+                    egui::Color32::from_rgb(80, 227, 137),
+                );
+                p.text(
+                    egui::pos2(plot.right() + 6.0, y),
+                    egui::Align2::LEFT_CENTER,
+                    format!("{:.1}", max_li * frac as f64),
+                    egui::FontId::monospace(8.5),
+                    egui::Color32::from_rgb(199, 125, 255),
+                );
+            }
+            draw_epoch_axis(&p, plot);
+
+            let bar_w = (plot.width() / n.max(1) as f32 * 0.42).clamp(16.0, 34.0);
+            for (i, ep) in self.grand_epochs.iter().enumerate() {
+                let fx = if n <= 1 { 0.5 } else { i as f32 / (n - 1) as f32 };
+                let x = plot.left() + fx * plot.width();
+                let ch_frac = (ep.heritable_channels_active as f32 / 5.8).clamp(0.05, 0.92);
+                let bar_top = plot.bottom() - ch_frac * plot.height();
+                let bar = egui::Rect::from_min_max(
+                    egui::pos2(x - bar_w * 0.5, bar_top),
+                    egui::pos2(x + bar_w * 0.5, plot.bottom()),
+                );
+                p.rect_filled(bar, 2.0, egui::Color32::from_rgba_premultiplied(250, 204, 21, 30));
+                p.text(
+                    egui::pos2(x, plot.bottom() - 10.0),
+                    egui::Align2::CENTER_CENTER,
+                    format!("{}ch", ep.heritable_channels_active),
+                    egui::FontId::monospace(8.5),
+                    egui::Color32::from_rgb(253, 224, 71),
+                );
+            }
+
+            let mi_pts: Vec<egui::Pos2> = self
+                .grand_epochs
+                .iter()
+                .enumerate()
+                .map(|(i, ep)| {
+                    let fx = if n <= 1 { 0.5 } else { i as f32 / (n - 1) as f32 };
+                    let fy = (ep.heritable_mutual_info_bits / max_mi).clamp(0.0, 1.0) as f32;
+                    egui::pos2(plot.left() + fx * plot.width(), plot.bottom() - fy * plot.height())
+                })
+                .collect();
+            let li_pts: Vec<egui::Pos2> = self
+                .grand_epochs
+                .iter()
+                .enumerate()
+                .map(|(i, ep)| {
+                    let fx = if n <= 1 { 0.5 } else { i as f32 / (n - 1) as f32 };
+                    let fy = (ep.informational_leverage_li / max_li).clamp(0.0, 1.0) as f32;
+                    egui::pos2(plot.left() + fx * plot.width(), plot.bottom() - fy * plot.height())
+                })
+                .collect();
+            p.add(egui::Shape::line(
+                li_pts.clone(),
+                egui::Stroke::new(2.2_f32, egui::Color32::from_rgb(199, 125, 255)),
+            ));
+            p.add(egui::Shape::line(
+                mi_pts.clone(),
+                egui::Stroke::new(2.5_f32, egui::Color32::from_rgb(80, 227, 137)),
+            ));
+            for (i, pt) in mi_pts.iter().enumerate() {
+                p.circle_filled(*pt, 3.8, egui::Color32::from_rgb(80, 227, 137));
+                if i == 2 {
+                    p.text(
+                        *pt + egui::vec2(-8.0, -24.0),
+                        egui::Align2::CENTER_BOTTOM,
+                        format!("{:.1}b", self.grand_epochs[i].heritable_mutual_info_bits),
+                        egui::FontId::monospace(8.5),
+                        egui::Color32::from_rgb(167, 243, 208),
+                    );
+                } else if i == n - 1 {
+                    p.text(
+                        *pt + egui::vec2(-8.0, -8.0),
+                        egui::Align2::RIGHT_BOTTOM,
+                        format!("{:.1}b", self.grand_epochs[i].heritable_mutual_info_bits),
+                        egui::FontId::monospace(8.5),
+                        egui::Color32::from_rgb(167, 243, 208),
+                    );
+                }
+            }
+            for pt in &li_pts {
+                p.circle_filled(*pt, 3.4, egui::Color32::from_rgb(199, 125, 255));
+            }
+        }
+
+        // Bottom Table: 8-Epoch Major Transition Telemetry Ledger
+        paint_framed_box(
+            painter,
+            table_rect,
+            5.0,
+            egui::Color32::from_rgb(13, 19, 36),
+            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(45, 65, 105)),
+        );
+        let tp = painter.with_clip_rect(table_rect);
+        let w = table_rect.width();
+        let x_cols = [
+            table_rect.left() + 10.0,
+            table_rect.left() + w * 0.155,
+            table_rect.left() + w * 0.235,
+            table_rect.left() + w * 0.280,
+            table_rect.left() + w * 0.325,
+            table_rect.left() + w * 0.390,
+            table_rect.left() + w * 0.445,
+            table_rect.left() + w * 0.515,
+            table_rect.left() + w * 0.575,
+            table_rect.left() + w * 0.635,
+            table_rect.left() + w * 0.700,
+        ];
+        let headers = [
+            "Epoch",
+            "Age",
+            "Ch",
+            "Pop",
+            "MI (b)",
+            "L_I",
+            "v_O",
+            "O2",
+            "CO2",
+            "Exergy",
+            "Landmark Transition",
+        ];
+        let hdr_y = table_rect.top() + 9.0;
+        for (x, h) in x_cols.iter().zip(headers.iter()) {
+            tp.text(
+                egui::pos2(*x, hdr_y),
+                egui::Align2::LEFT_TOP,
+                *h,
+                egui::FontId::monospace(9.2),
+                egui::Color32::from_rgb(125, 211, 252),
+            );
+        }
+        tp.line_segment(
+            [
+                egui::pos2(table_rect.left() + 8.0, hdr_y + 15.0),
+                egui::pos2(table_rect.right() - 8.0, hdr_y + 15.0),
+            ],
+            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(45, 65, 105)),
+        );
+
+        let body_top = hdr_y + 19.0;
+        let row_h = ((table_rect.bottom() - body_top - 6.0) / n.max(1) as f32).clamp(18.0, 28.0);
+        let short_epoch_labels = [
+            "E1 Homochiral",
+            "E2 SGC + RAF",
+            "E3 T-DNA / LUCA",
+            "E4 GOE / LECA",
+            "E5 Germ-Soma",
+            "E6 Agri Superorg",
+            "E7 Archives + AI",
+            "E8 Gaia-2.0",
+        ];
+        for (i, ep) in self.grand_epochs.iter().enumerate() {
+            let y0 = body_top + i as f32 * row_h;
+            if i % 2 == 1 {
+                tp.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(table_rect.left() + 6.0, y0),
+                        egui::pos2(table_rect.right() - 6.0, y0 + row_h - 1.0),
+                    ),
+                    2.0,
+                    egui::Color32::from_rgba_premultiplied(30, 41, 70, 80),
+                );
+            }
+            let yc = y0 + row_h * 0.5;
+            let ep_lbl = short_epoch_labels
+                .get(i)
+                .copied()
+                .unwrap_or_else(|| ep.epoch.code());
+            let mut landmark: String = ep.landmark_summary.chars().take(34).collect();
+            if ep.landmark_summary.chars().count() > 34 {
+                landmark.push_str("...");
+            }
+            let cells = [
+                ep_lbl.to_string(),
+                format!("{:.3}", ep.geologic_age_ga),
+                format!("{}/5", ep.heritable_channels_active),
+                format!("{}", ep.population_size),
+                format!("{:.1}", ep.heritable_mutual_info_bits),
+                format!("{:.2}", ep.informational_leverage_li),
+                format!("{:+.3}", ep.order_velocity_vo),
+                format!("{:.3}", ep.planetary_o2),
+                format!("{:.0}", ep.planetary_co2_ppm),
+                format!("{:.2}", ep.planetary_exergy_budget),
+                landmark,
+            ];
+            for (c_idx, (x, cell)) in x_cols.iter().zip(cells.iter()).enumerate() {
+                let col = match c_idx {
+                    0 => egui::Color32::from_rgb(226, 232, 240),
+                    2 => egui::Color32::from_rgb(253, 224, 71),
+                    4 => egui::Color32::from_rgb(130, 245, 150),
+                    7 => egui::Color32::from_rgb(76, 201, 240),
+                    10 => egui::Color32::from_rgb(203, 213, 225),
+                    _ => egui::Color32::from_rgb(186, 198, 218),
+                };
+                tp.text(
+                    egui::pos2(*x, yc),
+                    egui::Align2::LEFT_CENTER,
+                    cell,
+                    egui::FontId::monospace(8.8),
+                    col,
+                );
+            }
+        }
     }
 }
 
@@ -1269,6 +1854,7 @@ fn paint_phylogram_tree(
     world: &SimulationWorld,
     show_labels: bool,
 ) {
+    let painter = &painter.with_clip_rect(rect);
     let layout = world.current_phylogram_layout();
     let p_sum = world.phylo_summary();
 
@@ -1276,27 +1862,27 @@ fn paint_phylogram_tree(
         rect.left_top() + egui::vec2(8.0, 4.0),
         egui::Align2::LEFT_TOP,
         format!(
-            "Network — MRCA N{} | Mito->Hy:{} | Hy->MitoS:{} | MRO->0:{} | #H:{}",
+            "Network — N{} | Hy:{} Mit:{} MRO0:{} | #H:{}",
             p_sum.mrca_id,
             p_sum.hydrogenosome_transition_events,
             p_sum.mitosome_transition_events,
             p_sum.mro_complete_loss_events,
             p_sum.endosymbiotic_fusions
         ),
-        egui::FontId::proportional(13.0),
+        egui::FontId::proportional(12.5),
         egui::Color32::from_rgb(230, 240, 255),
     );
     painter.text(
-        rect.left_top() + egui::vec2(8.0, 22.0),
+        rect.left_top() + egui::vec2(8.0, 21.0),
         egui::Align2::LEFT_TOP,
-        "Teal=Hydrogenosome(H2+ISC) | Gold=Mitosome(ISC=1) | Cyan=MRO->0(SUF) | Violet=AeroMito",
-        egui::FontId::monospace(9.5),
+        "Teal=Hydro(H2) | Gold=MitoS | Cyan=MRO0 | Violet=Aero",
+        egui::FontId::monospace(9.0),
         egui::Color32::from_rgb(142, 168, 212),
     );
 
     let plot = egui::Rect::from_min_max(
         rect.left_top() + egui::vec2(18.0, 44.0),
-        rect.right_bottom() - egui::vec2(if show_labels { 118.0 } else { 18.0 }, 24.0),
+        rect.right_bottom() - egui::vec2(if show_labels { 148.0 } else { 18.0 }, 24.0),
     );
     if plot.width() < 20.0 || plot.height() < 20.0 {
         return;
@@ -1447,7 +2033,7 @@ fn paint_phylogram_tree(
                     pt + egui::vec2(6.0, 0.0),
                     egui::Align2::LEFT_CENTER,
                     &nd.label,
-                    egui::FontId::monospace(9.5),
+                    egui::FontId::monospace(8.5),
                     col,
                 );
             }
@@ -1485,22 +2071,23 @@ fn paint_spatial_grid(
     world: &SimulationWorld,
     show_labels: bool,
 ) {
+    let painter = &painter.with_clip_rect(rect);
     let m = world.latest_metrics();
     painter.text(
         rect.left_top() + egui::vec2(8.0, 4.0),
         egui::Align2::LEFT_TOP,
         format!(
-            "Spatial Grid — AeroMito:{} Hydro:{} MitoS:{} MRO0:{}",
+            "Spatial — Aero:{} Hy:{} Mit:{} MRO0:{}",
             m.aerobic_mito_count, m.hydrogenosome_count, m.mitosome_count, m.amiteukaryote_count
         ),
-        egui::FontId::proportional(13.0),
+        egui::FontId::proportional(12.5),
         egui::Color32::from_rgb(230, 240, 255),
     );
     painter.text(
-        rect.left_top() + egui::vec2(8.0, 22.0),
+        rect.left_top() + egui::vec2(8.0, 21.0),
         egui::Align2::LEFT_TOP,
-        "TealRing=Hydrogenosome | GoldCore=Mitosome(ISC) | CyanRing=Amiteukaryote(SUF)",
-        egui::FontId::monospace(9.5),
+        "Teal=Hydro | Gold=MitoS(ISC) | Cyan=MRO0(SUF)",
+        egui::FontId::monospace(9.0),
         egui::Color32::from_rgb(142, 168, 212),
     );
 
@@ -1854,4 +2441,377 @@ pub fn run_gui(seed: u64) -> Result<(), String> {
         Box::new(move |cc| Ok(Box::new(ItmeGuiApp::new(cc, seed)))),
     )
     .map_err(|e| format!("Failed to launch native GUI: {e}"))
+}
+
+pub fn run_screenshot(out_path: &str, seed: u64, view_idx: u8) -> Result<(), String> {
+    let ctx = egui::Context::default();
+    let mut app = ItmeGuiApp::new_with_ctx(&ctx, seed);
+
+    match view_idx {
+        1 => {
+            for world in &mut app.worlds {
+                world.mode = SimulationMode::OrganicSandbox;
+                world.apply_regime_preset(RegimeId::R20AutoadaptiveReplicative, false);
+                for _ in 0..10 {
+                    world.step();
+                }
+                world.apply_regime_preset(RegimeId::R30FullyDarwinian, true);
+                for _ in 0..14 {
+                    world.step();
+                }
+                world.apply_regime_preset(RegimeId::R30SoftInheritance, true);
+                for _ in 0..14 {
+                    world.step();
+                }
+                world.apply_regime_preset(RegimeId::R35Symbiogenetic, true);
+                for _ in 0..14 {
+                    world.step();
+                }
+                // Cultivate coexisting MRO grades (MRO->0, Mitosome, Hydrogenosome, AerobicMito),
+                // serial holobionts, apicoplast parasites, and kleptoplasty tipping points:
+                world.controls.cytosolic_suf_hgt_rescue = 0.72;
+                for _ in 0..2 {
+                    let _ = world.trigger_endosymbiotic_pulse();
+                }
+                for _ in 0..3 {
+                    let _ = world.trigger_mro_reduction_pulse();
+                }
+                for _ in 0..6 {
+                    world.step();
+                }
+                for _ in 0..2 {
+                    let _ = world.trigger_endosymbiotic_pulse();
+                }
+                for _ in 0..2 {
+                    let _ = world.trigger_mro_reduction_pulse();
+                }
+                for _ in 0..6 {
+                    world.step();
+                }
+                for _ in 0..2 {
+                    let _ = world.trigger_endosymbiotic_pulse();
+                }
+                let _ = world.trigger_serial_endosymbiosis_pulse();
+                let _ = world.trigger_klepto_steal_pulse();
+                let _ = world.trigger_apicoplast_reduction_pulse();
+                for _ in 0..22 {
+                    world.step();
+                }
+            }
+            app.viewport_layout = ViewportLayout::SpatialAndPhylogeny;
+        }
+        2 => {
+            let epochs = app.worlds[0].run_continuous_grand_trajectory(10);
+            if let Some(last_ep) = epochs.last() {
+                app.export_status = Some(format!(
+                    "Completed 8-Epoch 4.25 Ga Grand Trajectory -> {}: L_I = {:.2}, MI = {:.1}b, O2 = {:.2}, Exergy = {:.2}!",
+                    last_ep.epoch.code(),
+                    last_ep.informational_leverage_li,
+                    last_ep.heritable_mutual_info_bits,
+                    last_ep.planetary_o2,
+                    last_ep.planetary_exergy_budget
+                ));
+            }
+            app.grand_epochs = epochs;
+            app.viewport_layout = ViewportLayout::GrandTrajectory;
+        }
+        3 => {
+            for (idx, world) in app.worlds.iter_mut().enumerate() {
+                if idx == 0 {
+                    world.mode = SimulationMode::OrganicSandbox;
+                    world.apply_regime_preset(RegimeId::R35Symbiogenetic, false);
+                    world.controls.cytosolic_suf_hgt_rescue = 0.72;
+                    for _ in 0..3 {
+                        let _ = world.trigger_endosymbiotic_pulse();
+                    }
+                    let _ = world.trigger_mro_reduction_pulse();
+                    let _ = world.trigger_serial_endosymbiosis_pulse();
+                    for _ in 0..24 {
+                        world.step();
+                    }
+                } else if idx == 1 {
+                    world.mode = SimulationMode::GuidedCurriculum;
+                    world.apply_regime_preset(RegimeId::R30SoftInheritance, false);
+                    for _ in 0..26 {
+                        world.step();
+                    }
+                } else {
+                    world.mode = SimulationMode::GuidedCurriculum;
+                    world.apply_regime_preset(RegimeId::R30PseudoSoftInheritance, false);
+                    for _ in 0..26 {
+                        world.step();
+                    }
+                }
+            }
+            app.viewport_layout = ViewportLayout::TriOrganism3D;
+            app.show_labels = false;
+            app.camera.yaw = 0.56;
+            app.camera.pitch = 0.30;
+            app.camera.zoom = 1.32;
+        }
+        other => {
+            return Err(format!(
+                "Unsupported --screenshot-view {other} (expected 1, 2, or 3)"
+            ));
+        }
+    }
+    app.paused = true;
+    render_offscreen_png(&ctx, out_path, |c| app.draw_panels(c))
+}
+
+fn block_on_wgpu<F: std::future::Future>(fut: F) -> F::Output {
+    struct ThreadWaker(std::thread::Thread);
+    impl std::task::Wake for ThreadWaker {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+        fn wake_by_ref(self: &std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = std::task::Waker::from(std::sync::Arc::new(ThreadWaker(std::thread::current())));
+    let mut fut = std::pin::pin!(fut);
+    let mut cx = std::task::Context::from_waker(&waker);
+    loop {
+        match fut.as_mut().poll(&mut cx) {
+            std::task::Poll::Ready(out) => return out,
+            std::task::Poll::Pending => std::thread::park(),
+        }
+    }
+}
+
+fn render_offscreen_png(
+    ctx: &egui::Context,
+    out_path: &str,
+    mut draw_ui: impl FnMut(&egui::Context),
+) -> Result<(), String> {
+    use eframe::{egui_wgpu, wgpu};
+    const WIDTH: u32 = 1600;
+    const HEIGHT: u32 = 1000;
+    const BYTES_PER_ROW: u32 = WIDTH * 4;
+
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::PRIMARY | wgpu::Backends::GL,
+        ..Default::default()
+    });
+    let adapter = block_on_wgpu(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    }))
+    .or_else(|| {
+        block_on_wgpu(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::None,
+            compatible_surface: None,
+            force_fallback_adapter: true,
+        }))
+    })
+    .ok_or_else(|| "No wgpu adapter available for offscreen screenshot".to_string())?;
+
+    let mut limits = wgpu::Limits::default();
+    limits.max_texture_dimension_2d = adapter.limits().max_texture_dimension_2d.min(8192);
+    let (device, queue) = block_on_wgpu(adapter.request_device(
+        &wgpu::DeviceDescriptor {
+            label: Some("itme_offscreen_device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: limits,
+            memory_hints: Default::default(),
+        },
+        None,
+    ))
+    .map_err(|e| format!("wgpu request_device failed: {e}"))?;
+
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("itme_offscreen_target"),
+        size: wgpu::Extent3d {
+            width: WIDTH,
+            height: HEIGHT,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("itme_offscreen_staging"),
+        size: u64::from(BYTES_PER_ROW) * u64::from(HEIGHT),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut renderer = egui_wgpu::Renderer::new(&device, format, None, 1, false);
+    let screen_desc = egui_wgpu::ScreenDescriptor {
+        size_in_pixels: [WIDTH, HEIGHT],
+        pixels_per_point: 1.0,
+    };
+
+    for frame_idx in 0..4usize {
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(WIDTH as f32, HEIGHT as f32),
+        ));
+        raw_input
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .and_modify(|v| v.native_pixels_per_point = Some(1.0));
+        raw_input.time = Some(frame_idx as f64 / 60.0);
+        ctx.set_pixels_per_point(1.0);
+
+        let full_output = ctx.run(raw_input, &mut draw_ui);
+        let paint_jobs = ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+
+        for (id, delta) in &full_output.textures_delta.set {
+            renderer.update_texture(&device, &queue, *id, delta);
+        }
+
+        let mut prep_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("itme_offscreen_prep"),
+        });
+        let user_cmds =
+            renderer.update_buffers(&device, &queue, &mut prep_encoder, &paint_jobs, &screen_desc);
+        queue.submit(user_cmds.into_iter().chain(std::iter::once(prep_encoder.finish())));
+
+        let mut pass_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("itme_offscreen_pass_encoder"),
+        });
+        {
+            let mut rpass = pass_encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("itme_offscreen_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.05,
+                                g: 0.07,
+                                b: 0.12,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                })
+                .forget_lifetime();
+            renderer.render(&mut rpass, &paint_jobs, &screen_desc);
+        }
+
+        if frame_idx == 3 {
+            pass_encoder.copy_texture_to_buffer(
+                wgpu::ImageCopyTexture {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::ImageCopyBuffer {
+                    buffer: &staging,
+                    layout: wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(BYTES_PER_ROW),
+                        rows_per_image: Some(HEIGHT),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: WIDTH,
+                    height: HEIGHT,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+
+        queue.submit(std::iter::once(pass_encoder.finish()));
+        for id in &full_output.textures_delta.free {
+            renderer.free_texture(id);
+        }
+        device.poll(wgpu::Maintain::Wait);
+    }
+
+    let slice = staging.slice(..);
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    slice.map_async(wgpu::MapMode::Read, move |res| {
+        let _ = tx.send(res);
+    });
+    device.poll(wgpu::Maintain::Wait);
+    rx.recv()
+        .map_err(|e| format!("GPU readback channel failed: {e}"))?
+        .map_err(|e| format!("GPU buffer map failed: {e}"))?;
+
+    let rgba = slice.get_mapped_range().to_vec();
+    staging.unmap();
+    write_rgba_png(std::path::Path::new(out_path), WIDTH, HEIGHT, &rgba)
+}
+
+fn write_rgba_png(path: &std::path::Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
+    if rgba.len() != (width as usize) * (height as usize) * 4 {
+        return Err("RGBA buffer length mismatch".to_string());
+    }
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| format!("mkdir failed: {e}"))?;
+        }
+    }
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut c = !0u32;
+        for &b in bytes {
+            c ^= u32::from(b);
+            for _ in 0..8 {
+                c = (c >> 1) ^ (0xEDB8_8320 & (0u32.wrapping_sub(c & 1)));
+            }
+        }
+        !c
+    }
+    fn push_chunk(out: &mut Vec<u8>, tag: &[u8; 4], data: &[u8]) {
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        let start = out.len();
+        out.extend_from_slice(tag);
+        out.extend_from_slice(data);
+        out.extend_from_slice(&crc32(&out[start..]).to_be_bytes());
+    }
+    let row_bytes = (width as usize) * 4;
+    let mut raw = Vec::with_capacity((row_bytes + 1) * (height as usize));
+    for row in rgba.chunks_exact(row_bytes) {
+        raw.push(0);
+        raw.extend_from_slice(row);
+    }
+    let (mut s1, mut s2) = (1u32, 0u32);
+    for &b in &raw {
+        s1 = (s1 + u32::from(b)) % 65521;
+        s2 = (s2 + s1) % 65521;
+    }
+    let mut zlib = Vec::with_capacity(raw.len() + 64);
+    zlib.extend_from_slice(&[0x78, 0x01]);
+    let mut off = 0usize;
+    while off < raw.len() {
+        let end = (off + u16::MAX as usize).min(raw.len());
+        let block = &raw[off..end];
+        let len = block.len() as u16;
+        zlib.push(u8::from(end == raw.len()));
+        zlib.extend_from_slice(&len.to_le_bytes());
+        zlib.extend_from_slice(&(!len).to_le_bytes());
+        zlib.extend_from_slice(block);
+        off = end;
+    }
+    zlib.extend_from_slice(&((s2 << 16) | s1).to_be_bytes());
+
+    let mut png = Vec::with_capacity(zlib.len() + 64);
+    png.extend_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
+    let mut ihdr = [0u8; 13];
+    ihdr[0..4].copy_from_slice(&width.to_be_bytes());
+    ihdr[4..8].copy_from_slice(&height.to_be_bytes());
+    ihdr[8] = 8;
+    ihdr[9] = 6;
+    push_chunk(&mut png, b"IHDR", &ihdr);
+    push_chunk(&mut png, b"IDAT", &zlib);
+    push_chunk(&mut png, b"IEND", &[]);
+    fs::write(path, &png).map_err(|e| format!("Failed writing PNG '{}': {e}", path.display()))
 }

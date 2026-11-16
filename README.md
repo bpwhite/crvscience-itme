@@ -1,5 +1,7 @@
 # ITME v23.0 (`v2.3.0`) — Continuous 4.25 Ga Multi-Epoch Hadean-to-Gaia Grand Trajectory Engine
 
+![ITME Headless Workbench](validation/headless_screenshot.png)
+
 Native Rust simulation unifying **24 evolutionary milestones** into a single unbroken **8-Epoch Continuous Trajectory (`4.25 Ga -> Gaia 2.0`)** on one persistent `SimulationWorld` and one reticulate `PhylogenyTracker`:
 1. **Epoch 1 (`~4.25 Ga`) — Magnetite `CISS` Homochirality & Minihelix `L-Aminoacylation`** ([Ozturk et al., 2023](https://pmc.ncbi.nlm.nih.gov/articles/PMC10246896/); [Tamura & Schimmel, 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC1564265/))
 2. **Epoch 2 (`~4.18 Ga`) — Collective `20-AA SGC` Crystallization & `RAF` Protocells** ([Vetsigian et al., 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC1502294/); [Damer & Deamer, 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7133448/); [Hordijk et al., 2018](https://pmc.ncbi.nlm.nih.gov/articles/PMC6315399/))

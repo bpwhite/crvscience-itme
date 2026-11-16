@@ -1,3 +1,18 @@
+// Copyright (C) 2026 CRV Science Network (https://crvscience.com)
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://gnu.org>.
+
 //! Unified CLI + Native GUI entrypoint for the ITME v12.0 (`v1.2.0`) Rust Simulation.
 
 use itme_evolution_sim::console::{run_headless, ConsoleOptions};
@@ -22,6 +37,7 @@ USAGE:
 OPTIONS:
     --headless, --console         Run in terminal console mode (no display server required)
     --gui                         Force native desktop GUI mode
+    --screenshot <FILE>           Render 1600x1000 offscreen GPU screenshot to PNG and exit
     --organism <SLUG>             Select `rna`, `hominid`, `ai`, or `all` [default: all]
     --regime <CODE>               Select `all` (13 regimes) or a specific code (`0.0`, `0.5`, `1.0`,
                                   `1.5-AA`, `1.5-RP`, `2.0-EC`, `2.0-BAL`, `2.0-QS`, `3.0-DAR`,
@@ -41,6 +57,8 @@ fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let mut headless = false;
     let mut force_gui = false;
+    let mut screenshot_path: Option<String> = None;
+    let mut screenshot_view: u8 = 1;
     let mut opts = ConsoleOptions::default();
 
     let mut i = 0usize;
@@ -147,12 +165,50 @@ fn main() {
                 };
                 opts.phylo_svg_path = Some(val.clone());
             }
+            "--screenshot" => {
+                i += 1;
+                let Some(val) = args.get(i) else {
+                    eprintln!("Error: --screenshot requires an output PNG file path.");
+                    process::exit(2);
+                };
+                screenshot_path = Some(val.clone());
+            }
+            "--screenshot-view" => {
+                i += 1;
+                let Some(val) = args.get(i) else {
+                    eprintln!("Error: --screenshot-view requires a view index (1, 2, or 3).");
+                    process::exit(2);
+                };
+                screenshot_view = val.parse::<u8>().unwrap_or_else(|_| {
+                    eprintln!("Error: invalid --screenshot-view value '{val}' (expected 1, 2, or 3).");
+                    process::exit(2);
+                });
+            }
             other => {
                 eprintln!("Unknown flag '{other}'. Run with `--help` for usage.");
                 process::exit(2);
             }
         }
         i += 1;
+    }
+
+    if let Some(ref out_path) = screenshot_path {
+        #[cfg(feature = "gui")]
+        {
+            if let Err(err) =
+                itme_evolution_sim::gui::run_screenshot(out_path, opts.seed, screenshot_view)
+            {
+                eprintln!("Offscreen screenshot capture error: {err}");
+                process::exit(1);
+            }
+            return;
+        }
+        #[cfg(not(feature = "gui"))]
+        {
+            let _ = out_path;
+            eprintln!("Error: --screenshot requires `--features gui`.");
+            process::exit(1);
+        }
     }
 
     if headless && !force_gui {
