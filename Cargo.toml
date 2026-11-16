@@ -3,11 +3,11 @@ name = "itme_evolution_sim"
 version = "2.3.0"
 edition = "2021"
 description = "ITME v23.0 Native Rust Simulation: Continuous 4.25 Ga Multi-Epoch Grand Trajectory chaining Homochirality, SGC, RNA-to-DNA Virosphere, LUCA, Symbiogenesis, Multicellularity, Superorganisms, Exosomatic Archives, Formal AI & Gaia-2.0 Homeostasis"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [features]
 default = ["gui"]
 gui = ["dep:eframe"]
 
 [dependencies]
-eframe = { version = "0.29", optional = true, default-features = true }
+eframe = { version = "0.29", features = ["wgpu"], optional = true, default-features = true }

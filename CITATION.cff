@@ -3,7 +3,7 @@ message: "If you use CRV Science ITME in academic research, please cite the soft
 type: software
 title: "ITME: Continuous Four-Billion-Year Information-Theoretic Macroevolution and Planetary Biogeochemical Feedback Simulation"
 version: "2.3.0"
-license: "MIT"
+license: "GPL-3.0-or-later"
 repository-code: "https://github.com/bpwhite/crvscience-itme"
 url: "https://crvscience.com/apps"
 doi: "10.5281/zenodo.24222386"
