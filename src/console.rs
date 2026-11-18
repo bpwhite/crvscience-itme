@@ -74,9 +74,7 @@ pub fn run_grand_trajectory_headless(opts: &ConsoleOptions) -> io::Result<()> {
         "Epoch", "Age(Ga)", "Chan", "MI(bits)", "Lev(L_I)", "O2", "CO2(ppm)", "Exergy", "Transition Landmark"
     );
     println!(" {}", "-".repeat(126));
-    let mut csv_out = String::from(
-        "epoch,age_ga,tick_end,population,channels,mutual_info_bits,leverage_li,o2,co2_ppm,exergy,landmark\n",
-    );
+    let csv_out = SimulationWorld::export_grand_trajectory_csv(&summaries);
     for s in &summaries {
         println!(
             " {:<22} {:>7.3} {:>6} {:>9.2} {:>10.3} {:>8.2} {:>9.0} {:>8.2}  {}",
@@ -90,20 +88,6 @@ pub fn run_grand_trajectory_headless(opts: &ConsoleOptions) -> io::Result<()> {
             s.planetary_exergy_budget,
             s.landmark_summary
         );
-        csv_out.push_str(&format!(
-            "{},{:.3},{},{},{},{:.3},{:.3},{:.3},{:.1},{:.3},\"{}\"\n",
-            s.epoch.code(),
-            s.geologic_age_ga,
-            s.tick_end,
-            s.population_size,
-            s.heritable_channels_active,
-            s.heritable_mutual_info_bits,
-            s.informational_leverage_li,
-            s.planetary_o2,
-            s.planetary_co2_ppm,
-            s.planetary_exergy_budget,
-            s.landmark_summary
-        ));
     }
     if let Some(ref cp) = opts.csv_path {
         fs::write(Path::new(cp), csv_out)?;
@@ -134,7 +118,7 @@ pub fn run_headless(opts: &ConsoleOptions) -> io::Result<()> {
 
     let mut csv_buf = String::new();
     if opts.csv_path.is_some() {
-        csv_buf.push_str("organism,regime_code,regime_name,step,S_raw_bits,S_eff_bits,Adami_rho_within,C_emergent,L_I,S_T_minus,Order_O,O_pop,v_O,Phi_net,Q_landauer,Grid_Exergy,Byproduct_Pool,Niche_Capital,Producers,Syntrophs,Predators,Aero_Mitos,Hydrogenosomes,Mitosomes,Amiteukaryotes,Mean_MRO_Paths,Hydro_Transitions,MitoS_Transitions,MRO_Losses,Apico_Parasites,Mean_Apico_Paths,Apico_Transitions,Apico_Losses,Klepto_Hosts,Mean_KP_Integ,Mean_Klepto_HGT,Klepto_HGT_Events,Klepto_Fixations,Mosaic_Donors,Holobionts,Enslaved_Holobionts,Secondary_Holobionts,Tertiary_Holobionts,Active_Nucleomorphs,Mean_NM_Len,NM_Loss_Events,Serial_Fusions,Mean_EGT_Frac,Mean_Organelle_Len,EGT_Events,Mean_TL,FoodWeb_H_bits,Trophic_Flux,CrossFeed_Flux,Species_Count,F_ST,TMRCA_steps,Sackin_Imbalance,Speciation_Splits,Guild_Transitions,Endosymbiotic_Fusions,Active_Reticulations,MI_bits,Price_Cov,Price_Trans,Pop,Emergent_Dc\n");
+        csv_buf.push_str(SimulationWorld::TELEMETRY_CSV_HEADER);
     }
 
     let mut newick_buf = String::new();
@@ -179,76 +163,7 @@ pub fn run_headless(opts: &ConsoleOptions) -> io::Result<()> {
                 world.step();
                 if opts.csv_path.is_some() {
                     let m = world.latest_metrics();
-                    csv_buf.push_str(&format!(
-                        "{},{},\"{}\",{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.5},{:.4},{:.4},{:.4},{:.4},{:.4},{},{},{},{},{},{},{},{:.2},{},{},{},{},{:.2},{},{},{},{:.3},{:.2},{},{},{:.2},{},{},{},{},{},{:.2},{},{},{:.4},{:.2},{},{:.3},{:.3},{:.4},{:.4},{},{:.4},{},{:.4},{},{},{},{},{:.3},{:.5},{:.5},{},\"{}\"\n",
-                        org.slug(),
-                        regime.code(),
-                        regime.name(),
-                        m.step,
-                        m.structure_raw_bits,
-                        m.structure_s,
-                        m.adami_conservation_rho,
-                        m.complexity_c,
-                        m.leverage_li,
-                        m.stability_st,
-                        m.order_o,
-                        m.ecosystem_order_pop,
-                        m.order_velocity_vo,
-                        m.net_exergy_phi,
-                        m.landauer_cost_q,
-                        m.mean_grid_exergy,
-                        m.mean_byproduct_pool,
-                        m.mean_niche_capital,
-                        m.producer_count,
-                        m.syntroph_count,
-                        m.predator_count,
-                        m.aerobic_mito_count,
-                        m.hydrogenosome_count,
-                        m.mitosome_count,
-                        m.amiteukaryote_count,
-                        m.mean_mro_pathways,
-                        m.hydrogenosome_transition_events,
-                        m.mitosome_transition_events,
-                        m.mro_complete_loss_events,
-                        m.apicoplast_parasite_count,
-                        m.mean_apicoplast_pathways,
-                        m.apicoplast_transition_events,
-                        m.apicoplast_loss_events,
-                        m.kleptoplastic_host_count,
-                        m.mean_kleptoplast_integrity,
-                        m.mean_klepto_hgt_loci,
-                        m.klepto_hgt_events,
-                        m.klepto_fixation_events,
-                        m.mosaic_donor_diversity,
-                        m.holobiont_count,
-                        m.enslaved_holobiont_count,
-                        m.secondary_holobiont_count,
-                        m.tertiary_holobiont_count,
-                        m.active_nucleomorph_count,
-                        m.mean_nucleomorph_len,
-                        m.nucleomorph_loss_events,
-                        m.serial_endosymbiotic_fusions,
-                        m.mean_egt_fraction,
-                        m.mean_organelle_len,
-                        m.egt_transfer_events,
-                        m.mean_trophic_level,
-                        m.food_web_entropy_bits,
-                        m.trophic_transfer_flux,
-                        m.cross_feeding_flux,
-                        m.species_count,
-                        m.fst_fixation_index,
-                        m.tmrca_steps,
-                        m.sackin_imbalance,
-                        m.speciation_events,
-                        m.guild_transition_events,
-                        m.endosymbiotic_fusions,
-                        m.active_reticulations,
-                        m.heritable_mutual_info_bits,
-                        m.price.selection_covariance,
-                        m.price.transmission_bias,
-                        m.population_size,
-                        m.diagnostic
-                    ));
+                    csv_buf.push_str(&SimulationWorld::format_telemetry_csv_row(org, regime, m));
                 }
             }
 

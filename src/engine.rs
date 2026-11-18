@@ -18,7 +18,7 @@
 //! Mixotrophic Kleptoplasty, Shopping-Bag `HGT` Tipping Points, Serial `1°/2°/3°` Endosymbiosis,
 //! Periplastidial Nucleomorph Reduction & Reticulate Phylogeny Engine (`SimulationWorld`).
 
-use crate::geometry::{build_structure_scene, StructureScene};
+use crate::geometry::{build_structure_scene, render_stage_atlas_svg, StructureScene};
 use crate::model::{
     compute_critical_fidelity, compute_food_web_entropy, compute_heritable_mutual_info,
     compute_thermodynamic_hazard, AbiogenesisStage, AgricultureState, ChiralCodeReactor,
@@ -84,6 +84,7 @@ pub struct SimulationWorld {
     pub total_formal_proofs_verified: usize,
     pub total_recursive_model_collapses: usize,
     pub biosphere: PlanetaryBiosphere,
+    pub coupled_biosphere_mode: bool,
     pub total_planetary_burnout_collapses: usize,
     pub hadean_bath: HadeanGeochemicalBath,
     pub total_eigen_error_catastrophes: usize,
@@ -155,6 +156,7 @@ impl SimulationWorld {
             total_formal_proofs_verified: 0,
             total_recursive_model_collapses: 0,
             biosphere: PlanetaryBiosphere::new_for_controls(&controls),
+            coupled_biosphere_mode: false,
             total_planetary_burnout_collapses: 0,
             hadean_bath: HadeanGeochemicalBath::new_for_controls(&controls),
             total_eigen_error_catastrophes: 0,
@@ -291,6 +293,7 @@ impl SimulationWorld {
         let mut summaries = Vec::with_capacity(8);
 
         // Configure anoxic Hadean starting atmosphere & prebiotic reactors (4.25 Ga):
+        self.coupled_biosphere_mode = true;
         self.controls = RegimeId::R35Symbiogenetic.preset_controls();
         self.controls.ambient_oxygen_level = 0.06;
         self.controls.biogeochemical_feedback_gain = 0.0;
@@ -319,9 +322,6 @@ impl SimulationWorld {
             u.seed_racemic_prebiotic_pool(&self.chiral_reactor);
             u.seed_labile_rna_cell(&self.rnr_virosphere);
         }
-
-        let mut prev_li = 0.45;
-        let mut prev_mi = 0.35;
 
         for &ep in &GrandEpochStage::ALL {
             let landmark = match ep {
@@ -441,13 +441,6 @@ impl SimulationWorld {
             };
 
             let m = self.latest_metrics().clone();
-            // Enforce clean cumulative epistemic/metabolic staircase envelope across epoch summaries:
-            let ep_idx = (ep as u8) as f64;
-            let raw_mi = m.heritable_mutual_info_bits;
-            let eff_mi = raw_mi.max(prev_mi + 2.4 + ep_idx * 4.5);
-            let eff_li = m.leverage_li.max(prev_li * 1.28 + 0.85);
-            prev_mi = eff_mi;
-            prev_li = eff_li;
 
             summaries.push(GrandTrajectoryEpochSummary {
                 epoch: ep,
@@ -455,8 +448,8 @@ impl SimulationWorld {
                 geologic_age_ga: ep.geologic_age_ga(),
                 population_size: m.population_size,
                 heritable_channels_active: ep.active_heritable_channels(),
-                heritable_mutual_info_bits: eff_mi,
-                informational_leverage_li: eff_li,
+                heritable_mutual_info_bits: m.heritable_mutual_info_bits,
+                informational_leverage_li: m.leverage_li,
                 order_velocity_vo: m.order_velocity_vo,
                 planetary_o2: self.biosphere.atmospheric_o2,
                 planetary_co2_ppm: self.biosphere.atmospheric_co2_ppm,
@@ -2474,6 +2467,9 @@ impl SimulationWorld {
         );
         self.target_regime = regime;
         self.controls = regime.preset_controls();
+        if self.coupled_biosphere_mode && !preserve_champion {
+            self.biosphere = PlanetaryBiosphere::new_for_controls(&self.controls);
+        }
         self.stage_step = 0;
         self.telemetry_window.reset();
         self.last_observed_fidelity = None;
@@ -3769,6 +3765,41 @@ impl SimulationWorld {
         }
 
         self.rng = rng;
+
+        if self.coupled_biosphere_mode
+            && self.controls.biogeochemical_feedback_gain > 0.001
+            && !self.population.is_empty()
+        {
+            let pop_f = self.population.len().max(1) as f64;
+            let (mut s_o2, mut s_rec, mut s_weath, mut s_tech, mut s_stew) =
+                (0.0, 0.0, 0.0, 0.0, 0.0);
+            for u in &mut self.population {
+                let (ao, sr, sw, tb, vs) =
+                    u.compute_planetary_guild_fluxes(&self.controls, &self.biosphere);
+                s_o2 += ao;
+                s_rec += sr;
+                s_weath += sw;
+                s_tech += tb;
+                s_stew += vs;
+            }
+            let (_, burnout) = self.biosphere.step_biogeochemical_feedbacks(
+                s_o2 / pop_f,
+                s_rec / pop_f,
+                s_weath / pop_f,
+                s_tech / pop_f,
+                s_stew / pop_f,
+                &self.controls,
+            );
+            self.controls.ambient_oxygen_level = self.biosphere.atmospheric_o2;
+            if burnout {
+                for u in &mut self.population {
+                    if u.apply_planetary_boundary_stress(&self.biosphere) {
+                        self.total_planetary_burnout_collapses += 1;
+                    }
+                }
+            }
+        }
+
         self.record_metrics();
     }
 
@@ -4682,5 +4713,170 @@ impl SimulationWorld {
             self.population.len(),
             self.phase_time,
         )
+    }
+
+    pub const TELEMETRY_CSV_HEADER: &'static str = "organism,regime_code,regime_name,step,S_raw_bits,S_eff_bits,Adami_rho_within,C_emergent,L_I,S_T_minus,Order_O,O_pop,v_O,Phi_net,Q_landauer,Grid_Exergy,Byproduct_Pool,Niche_Capital,Producers,Syntrophs,Predators,Aero_Mitos,Hydrogenosomes,Mitosomes,Amiteukaryotes,Mean_MRO_Paths,Hydro_Transitions,MitoS_Transitions,MRO_Losses,Apico_Parasites,Mean_Apico_Paths,Apico_Transitions,Apico_Losses,Klepto_Hosts,Mean_KP_Integ,Mean_Klepto_HGT,Klepto_HGT_Events,Klepto_Fixations,Mosaic_Donors,Holobionts,Enslaved_Holobionts,Secondary_Holobionts,Tertiary_Holobionts,Active_Nucleomorphs,Mean_NM_Len,NM_Loss_Events,Serial_Fusions,Mean_EGT_Frac,Mean_Organelle_Len,EGT_Events,Mean_TL,FoodWeb_H_bits,Trophic_Flux,CrossFeed_Flux,Species_Count,F_ST,TMRCA_steps,Sackin_Imbalance,Speciation_Splits,Guild_Transitions,Endosymbiotic_Fusions,Active_Reticulations,MI_bits,Price_Cov,Price_Trans,Pop,Emergent_Dc\n";
+
+    pub fn csv_escape(raw: &str) -> String {
+        let escaped = raw.replace('"', "\"\"");
+        format!("\"{escaped}\"")
+    }
+
+    pub fn format_telemetry_csv_row(
+        org: OrganismKind,
+        regime: RegimeId,
+        m: &ItmeMetrics,
+    ) -> String {
+        format!(
+            "{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.5},{:.4},{:.4},{:.4},{:.4},{:.4},{},{},{},{},{},{},{},{:.2},{},{},{},{},{:.2},{},{},{},{:.3},{:.2},{},{},{:.2},{},{},{},{},{},{:.2},{},{},{:.4},{:.2},{},{:.3},{:.3},{:.4},{:.4},{},{:.4},{},{:.4},{},{},{},{},{:.3},{:.5},{:.5},{},{}\n",
+            org.slug(),
+            regime.code(),
+            Self::csv_escape(regime.name()),
+            m.step,
+            m.structure_raw_bits,
+            m.structure_s,
+            m.adami_conservation_rho,
+            m.complexity_c,
+            m.leverage_li,
+            m.stability_st,
+            m.order_o,
+            m.ecosystem_order_pop,
+            m.order_velocity_vo,
+            m.net_exergy_phi,
+            m.landauer_cost_q,
+            m.mean_grid_exergy,
+            m.mean_byproduct_pool,
+            m.mean_niche_capital,
+            m.producer_count,
+            m.syntroph_count,
+            m.predator_count,
+            m.aerobic_mito_count,
+            m.hydrogenosome_count,
+            m.mitosome_count,
+            m.amiteukaryote_count,
+            m.mean_mro_pathways,
+            m.hydrogenosome_transition_events,
+            m.mitosome_transition_events,
+            m.mro_complete_loss_events,
+            m.apicoplast_parasite_count,
+            m.mean_apicoplast_pathways,
+            m.apicoplast_transition_events,
+            m.apicoplast_loss_events,
+            m.kleptoplastic_host_count,
+            m.mean_kleptoplast_integrity,
+            m.mean_klepto_hgt_loci,
+            m.klepto_hgt_events,
+            m.klepto_fixation_events,
+            m.mosaic_donor_diversity,
+            m.holobiont_count,
+            m.enslaved_holobiont_count,
+            m.secondary_holobiont_count,
+            m.tertiary_holobiont_count,
+            m.active_nucleomorph_count,
+            m.mean_nucleomorph_len,
+            m.nucleomorph_loss_events,
+            m.serial_endosymbiotic_fusions,
+            m.mean_egt_fraction,
+            m.mean_organelle_len,
+            m.egt_transfer_events,
+            m.mean_trophic_level,
+            m.food_web_entropy_bits,
+            m.trophic_transfer_flux,
+            m.cross_feeding_flux,
+            m.species_count,
+            m.fst_fixation_index,
+            m.tmrca_steps,
+            m.sackin_imbalance,
+            m.speciation_events,
+            m.guild_transition_events,
+            m.endosymbiotic_fusions,
+            m.active_reticulations,
+            m.heritable_mutual_info_bits,
+            m.price.selection_covariance,
+            m.price.transmission_bias,
+            m.population_size,
+            Self::csv_escape(&m.diagnostic.to_string())
+        )
+    }
+
+    pub fn export_history_csv(&self) -> String {
+        let mut out = String::from(Self::TELEMETRY_CSV_HEADER);
+        for (idx, m) in self.history.iter().enumerate() {
+            let reg = self
+                .regime_history
+                .get(idx)
+                .copied()
+                .unwrap_or(self.classified_regime);
+            out.push_str(&Self::format_telemetry_csv_row(self.organism, reg, m));
+        }
+        out
+    }
+
+    pub fn export_grand_trajectory_csv(epochs: &[GrandTrajectoryEpochSummary]) -> String {
+        let mut out = String::from(
+            "epoch,age_ga,tick_end,population,channels,mutual_info_bits,leverage_li,o2,co2_ppm,exergy,landmark\n",
+        );
+        for s in epochs {
+            out.push_str(&format!(
+                "{},{:.3},{},{},{},{:.3},{:.3},{:.3},{:.1},{:.3},{}\n",
+                s.epoch.code(),
+                s.geologic_age_ga,
+                s.tick_end,
+                s.population_size,
+                s.heritable_channels_active,
+                s.heritable_mutual_info_bits,
+                s.informational_leverage_li,
+                s.planetary_o2,
+                s.planetary_co2_ppm,
+                s.planetary_exergy_budget,
+                Self::csv_escape(&s.landmark_summary)
+            ));
+        }
+        out
+    }
+
+    pub fn build_stage_atlas_svg(&self) -> String {
+        let mut probe = Self::new(
+            self.organism,
+            RegimeId::ALL[0],
+            SimulationMode::OrganicSandbox,
+            12,
+            20250813,
+        );
+        probe.coupled_biosphere_mode = self.coupled_biosphere_mode;
+        let mut panels = Vec::with_capacity(RegimeId::ALL.len());
+        for (r_idx, &regime) in RegimeId::ALL.iter().enumerate() {
+            let preserve = r_idx > 2;
+            probe.apply_regime_preset(regime, preserve);
+            if !self.coupled_biosphere_mode {
+                probe.controls = regime.domain_preset_controls(self.organism);
+            }
+            for _ in 0..10 {
+                probe.step();
+            }
+            let m = probe.latest_metrics();
+            let panel_title = format!("{} | {}", self.organism.short_title(), regime.code());
+            let metric_line = if self.coupled_biosphere_mode {
+                format!(
+                    "O={:.2} O2={:.2} CO2={:.0}ppm",
+                    m.order_o, m.planetary_o2_level, m.planetary_co2_ppm
+                )
+            } else {
+                format!(
+                    "O={:.2} Hydro={} MitoS={} Apico={}",
+                    m.order_o,
+                    m.hydrogenosome_count,
+                    m.mitosome_count,
+                    m.apicoplast_parasite_count
+                )
+            };
+            panels.push((panel_title, metric_line, probe.current_scene()));
+        }
+        let title = if self.coupled_biosphere_mode {
+            "ITME v23.0 Coupled 4.25 Ga Planetary Biosphere Stage Atlas".to_string()
+        } else {
+            format!("ITME v23.0 {} — 13-Regime Stage Atlas", self.organism.title())
+        };
+        render_stage_atlas_svg(&title, &panels)
     }
 }

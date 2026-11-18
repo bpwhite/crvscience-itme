@@ -176,3 +176,136 @@ fn phylogeny_tracker_records_horizontal_transfers_and_reticulations() {
     let svg = tracker.to_svg_phylogram("HGT Reticulation Check", 4);
     assert!(svg.contains("<svg") && svg.contains("</svg>"));
 }
+
+#[test]
+fn biosphere_coupling_vs_domain_sandbox_isolation() {
+    for &org in &OrganismKind::ALL {
+        let isolated = RegimeId::R35Symbiogenetic.domain_preset_controls(org);
+        assert_eq!(
+            isolated.biogeochemical_feedback_gain, 0.0,
+            "{org:?} isolated preset must zero biogeochemical_feedback_gain"
+        );
+        assert_eq!(
+            isolated.planetary_stewardship_coupling, 0.0,
+            "{org:?} isolated preset must zero planetary_stewardship_coupling"
+        );
+        assert_eq!(
+            isolated.extractive_burn_intensity, 0.0,
+            "{org:?} isolated preset must zero extractive_burn_intensity"
+        );
+
+        let mut world = SimulationWorld::new(
+            org,
+            RegimeId::R35Symbiogenetic,
+            SimulationMode::OrganicSandbox,
+            12,
+            2026_0505,
+        );
+        assert!(!world.coupled_biosphere_mode);
+        world.controls = isolated;
+        let o2_before = world.biosphere.atmospheric_o2;
+        let co2_before = world.biosphere.atmospheric_co2_ppm;
+        let gibbs_before = world.biosphere.chemical_disequilibrium_bits;
+        for _ in 0..8 {
+            world.step();
+        }
+        assert!(
+            (world.biosphere.atmospheric_o2 - o2_before).abs() < 1e-12
+                && (world.biosphere.atmospheric_co2_ppm - co2_before).abs() < 1e-12
+                && (world.biosphere.chemical_disequilibrium_bits - gibbs_before).abs() < 1e-12,
+            "{org:?} isolated sandbox must not mutate planetary biosphere reservoirs"
+        );
+    }
+
+    let mut coupled = SimulationWorld::new(
+        OrganismKind::ArtificialIntelligence,
+        RegimeId::R35Symbiogenetic,
+        SimulationMode::OrganicSandbox,
+        12,
+        2026_0505,
+    );
+    coupled.coupled_biosphere_mode = true;
+    coupled.controls = RegimeId::R35Symbiogenetic.preset_controls();
+    coupled.controls.biogeochemical_feedback_gain = 0.85;
+    coupled.controls.planetary_stewardship_coupling = 0.88;
+    let o2_start = coupled.biosphere.atmospheric_o2;
+    let co2_start = coupled.biosphere.atmospheric_co2_ppm;
+    for _ in 0..10 {
+        coupled.step();
+    }
+    assert!(
+        (coupled.biosphere.atmospheric_o2 - o2_start).abs() > 1e-4
+            || (coupled.biosphere.atmospheric_co2_ppm - co2_start).abs() > 1e-2,
+        "Coupled PlanetaryBiosphere mode must actively step O2 and CO2 reservoirs"
+    );
+    let m = coupled.latest_metrics();
+    assert!((m.planetary_o2_level - coupled.biosphere.atmospheric_o2).abs() < 1e-12);
+    assert!((m.planetary_co2_ppm - coupled.biosphere.atmospheric_co2_ppm).abs() < 1e-12);
+}
+
+#[test]
+fn grand_trajectory_uses_unclamped_raw_mi_and_li() {
+    let mut world = SimulationWorld::new(
+        OrganismKind::ArtificialIntelligence,
+        RegimeId::R35Symbiogenetic,
+        SimulationMode::OrganicSandbox,
+        12,
+        20280101,
+    );
+    let epochs = world.run_continuous_grand_trajectory(10);
+    assert_eq!(epochs.len(), 8);
+
+    // Verify Epoch 8 reflects the exact final recorded metrics without any synthetic floor clamp:
+    let final_m = world.latest_metrics();
+    let final_ep = epochs.last().unwrap();
+    assert!(
+        (final_ep.heritable_mutual_info_bits - final_m.heritable_mutual_info_bits).abs() < 1e-12,
+        "Grand trajectory MI ({}) must match genuine raw latest_metrics ({})",
+        final_ep.heritable_mutual_info_bits,
+        final_m.heritable_mutual_info_bits
+    );
+    assert!(
+        (final_ep.informational_leverage_li - final_m.leverage_li).abs() < 1e-12,
+        "Grand trajectory L_I ({}) must match genuine raw latest_metrics ({})",
+        final_ep.informational_leverage_li,
+        final_m.leverage_li
+    );
+}
+
+#[test]
+fn shared_csv_and_stage_atlas_svg_exports_are_well_formed() {
+    let mut world = SimulationWorld::new(
+        OrganismKind::RnaDnaProtein,
+        RegimeId::R30FullyDarwinian,
+        SimulationMode::OrganicSandbox,
+        12,
+        777,
+    );
+    for _ in 0..5 {
+        world.step();
+    }
+    let hist_csv = world.export_history_csv();
+    let mut lines = hist_csv.lines();
+    let hdr = lines.next().expect("CSV header present");
+    assert!(hdr.starts_with("organism,regime_code,regime_name,step,"));
+    assert_eq!(hdr.split(',').count(), 67, "Telemetry CSV must have 67 columns");
+    assert_eq!(
+        lines.count(),
+        world.history.len(),
+        "Telemetry CSV must emit one row per history record"
+    );
+
+    let epochs = world.run_continuous_grand_trajectory(6);
+    let grand_csv = SimulationWorld::export_grand_trajectory_csv(&epochs);
+    let mut glines = grand_csv.lines();
+    let ghdr = glines.next().expect("Grand CSV header present");
+    assert!(ghdr.starts_with("epoch,age_ga,tick_end,"));
+    assert_eq!(glines.count(), 8, "Grand trajectory CSV must contain 8 epoch rows");
+
+    let atlas_svg = world.build_stage_atlas_svg();
+    assert!(atlas_svg.starts_with("<svg ") && atlas_svg.contains("</svg>"));
+    assert!(
+        atlas_svg.contains("R(0.0)") && atlas_svg.contains("R(3.5-SYM)"),
+        "Stage Atlas SVG must include all 13 regime panels"
+    );
+}

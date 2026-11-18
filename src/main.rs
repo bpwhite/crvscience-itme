@@ -13,13 +13,31 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://gnu.org>.
 
-//! Unified CLI + Native GUI entrypoint for the ITME v12.0 (`v1.2.0`) Rust Simulation.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+//! Unified CLI + Native GUI entrypoint for the ITME v23.0 (`v2.3.0`) Rust Simulation.
 
 use itme_evolution_sim::console::{run_headless, ConsoleOptions};
 use itme_evolution_sim::organisms::OrganismKind;
 use itme_evolution_sim::regimes::RegimeId;
 use std::env;
 use std::process;
+
+#[cfg(windows)]
+fn attach_parent_console_if_cli() {
+    if env::args_os().len() > 1 {
+        extern "system" {
+            fn AttachConsole(dw_process_id: u32) -> i32;
+        }
+        // Attach to parent console (ATTACH_PARENT_PROCESS = u32::MAX) when launched with CLI args.
+        unsafe {
+            let _ = AttachConsole(u32::MAX);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn attach_parent_console_if_cli() {}
 
 fn print_help() {
     println!(
@@ -54,10 +72,12 @@ OPTIONS:
 }
 
 fn main() {
+    attach_parent_console_if_cli();
     let args: Vec<String> = env::args().skip(1).collect();
     let mut headless = false;
     let mut force_gui = false;
     let mut screenshot_path: Option<String> = None;
+    #[cfg_attr(not(feature = "gui"), allow(unused_variables, unused_assignments))]
     let mut screenshot_view: u8 = 1;
     let mut opts = ConsoleOptions::default();
 
@@ -205,7 +225,7 @@ fn main() {
         }
         #[cfg(not(feature = "gui"))]
         {
-            let _ = out_path;
+            let _ = (out_path, screenshot_view);
             eprintln!("Error: --screenshot requires `--features gui`.");
             process::exit(1);
         }

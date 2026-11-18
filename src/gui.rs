@@ -15,21 +15,23 @@
 
 //! Native desktop GUI mode built with `eframe` / `egui` (`0.29`) — ITME v23.0.
 //!
-//! Starts at an isolated 3-Domain Main Menu launcher (`RNA/DNA/Protein`, `Hominid Populations`,
-//! and `Artificial Intelligences`), where launching any substrate opens a single dedicated
-//! `SimulationWorld` with domain-specific regime titles, grouped sliders, and telemetry.
+//! Starts at a 4-Card Main Menu launcher (3 isolated domain sandboxes: `RNA/DNA/Protein`,
+//! `Hominid Populations`, and `Artificial Intelligences`, plus the coupled `4.25 Ga PlanetaryBiosphere`
+//! engine), where launching any card opens a dedicated `SimulationWorld` with tailored controls and telemetry.
 
 use crate::engine::{SimulationMode, SimulationWorld};
 use crate::geometry::{Camera3D, StructureScene};
 use crate::model::{
     AbiogenesisStage, AgricultureState, ChiralityCodeStage, CulturalState, EusocialState,
     ExosomaticState, GenomeSubstrateStage, GrandTrajectoryEpochSummary, MachineSynthesisState,
-    MroClass, MulticellularState, OrderPhase, PlanetaryState, TrophicGuild,
+    MroClass, MulticellularState, OrderPhase, PlanetaryBiosphere, PlanetaryState, TrophicGuild,
 };
 use crate::organisms::OrganismKind;
 use crate::regimes::RegimeId;
 use eframe::{egui, App};
 use std::fs;
+use std::io::BufWriter;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const SPECIES_PALETTE: [[u8; 3]; 8] = [
@@ -82,6 +84,7 @@ impl MainMenuState {
 
 struct DomainSession {
     organism: OrganismKind,
+    coupled_biosphere: bool,
     world: SimulationWorld,
     viewport_layout: ViewportLayout,
     camera: Camera3D,
@@ -90,9 +93,10 @@ struct DomainSession {
     paused: bool,
     steps_per_second: f32,
     last_step_instant: Instant,
-    export_status: Option<String>,
+    export_status: Option<(String, bool)>,
     grand_epochs: Vec<GrandTrajectoryEpochSummary>,
     wants_main_menu: bool,
+    wants_about: bool,
 }
 
 enum AppScreen {
@@ -103,6 +107,7 @@ enum AppScreen {
 pub struct ItmeGuiApp {
     screen: AppScreen,
     default_seed: u64,
+    show_about: bool,
 }
 
 impl ItmeGuiApp {
@@ -120,6 +125,7 @@ impl ItmeGuiApp {
         Self {
             screen: AppScreen::MainMenu(MainMenuState::new(seed)),
             default_seed: seed,
+            show_about: false,
         }
     }
 
@@ -127,12 +133,16 @@ impl ItmeGuiApp {
         let mut next_screen: Option<AppScreen> = None;
         match &mut self.screen {
             AppScreen::MainMenu(menu) => {
-                if let Some(session) = Self::draw_main_menu(ctx, menu) {
+                if let Some(session) = Self::draw_main_menu(ctx, menu, &mut self.show_about) {
                     next_screen = Some(AppScreen::Simulation(Box::new(session)));
                 }
             }
             AppScreen::Simulation(session) => {
                 session.draw_panels(ctx);
+                if session.wants_about {
+                    session.wants_about = false;
+                    self.show_about = true;
+                }
                 if session.wants_main_menu {
                     let seed = self.default_seed;
                     next_screen = Some(AppScreen::MainMenu(MainMenuState::new(seed)));
@@ -142,6 +152,52 @@ impl ItmeGuiApp {
         if let Some(scr) = next_screen {
             self.screen = scr;
         }
+        self.draw_about_window(ctx);
+    }
+
+    fn draw_about_window(&mut self, ctx: &egui::Context) {
+        if !self.show_about {
+            return;
+        }
+        egui::Window::new("About ITME")
+            .open(&mut self.show_about)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.set_min_width(380.0);
+                ui.heading(
+                    egui::RichText::new("ITME — Information-Theoretic Model of Evolution")
+                        .color(egui::Color32::from_rgb(130, 245, 205))
+                        .strong(),
+                );
+                ui.label(
+                    egui::RichText::new(concat!("Version ", env!("CARGO_PKG_VERSION"), " (ITME v23.0)"))
+                        .strong(),
+                );
+                ui.add_space(6.0);
+                ui.label("Copyright CRV Science Network");
+                ui.label("License: GNU General Public License v3.0 or later (GPL-3.0-or-later)");
+                ui.add_space(6.0);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(
+                            "Continuous 4.25 Ga multi-epoch evolutionary, symbiogenetic, biocultural, formal AI, and planetary biosphere simulator.",
+                        )
+                        .small()
+                        .color(egui::Color32::from_rgb(186, 198, 218)),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.hyperlink_to("CRV Science Network", "https://crvscience.com");
+                    ui.separator();
+                    ui.hyperlink_to("CRV Science Apps Hub", "https://crvscience.com/apps");
+                });
+            });
     }
 
     fn domain_card_meta(org: OrganismKind) -> (&'static str, &'static str, egui::Color32, &'static [&'static str], &'static str) {
@@ -188,7 +244,28 @@ impl ItmeGuiApp {
         }
     }
 
-    fn draw_main_menu(ctx: &egui::Context, menu: &mut MainMenuState) -> Option<DomainSession> {
+    fn biosphere_card_meta() -> (&'static str, &'static str, &'static str, egui::Color32, &'static [&'static str], &'static str) {
+        (
+            "Domain 4 • Coupled Planetary Biosphere",
+            "4.25 Ga PlanetaryBiosphere",
+            "Hadean-to-Gaia-2.0 Biogeochemical & 5-Channel Coupling",
+            egui::Color32::from_rgb(52, 211, 153),
+            &[
+                "Hadean anoxic FeNiS cradle -> GOE oxygenation (O2 >= 0.25)",
+                "Live O2, CO2 ppm, N/P pool & Gibbs disequilibrium feedbacks",
+                "Continuous 8-Epoch 4.25 Ga -> Gaia-2.0 Grand Trajectory",
+                "Extractive CO2 overshoot vs verified planetary stewardship",
+                "Coupled biological, cultural, archival & AI channels (5/5)",
+            ],
+            "Couples autotrophic, syntrophic, superorganismal, and machine-verified guilds to live atmospheric O2, CO2, N/P, and Gibbs exergy reservoirs.",
+        )
+    }
+
+    fn draw_main_menu(
+        ctx: &egui::Context,
+        menu: &mut MainMenuState,
+        show_about: &mut bool,
+    ) -> Option<DomainSession> {
         let mut launched: Option<DomainSession> = None;
 
         egui::TopBottomPanel::top("itme_menu_top").show(ctx, |ui| {
@@ -201,16 +278,20 @@ impl ItmeGuiApp {
                         .color(egui::Color32::from_rgb(130, 245, 205)),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("About").clicked() {
+                        *show_about = true;
+                    }
+                    ui.separator();
                     ui.label(
-                        egui::RichText::new("CRV Science Network • GPL-3.0")
+                        egui::RichText::new("Copyright CRV Science Network")
                             .small()
-                            .color(egui::Color32::from_rgb(148, 163, 184)),
+                            .color(egui::Color32::from_rgb(168, 184, 208)),
                     );
                 });
             });
             ui.label(
                 egui::RichText::new(
-                    "Select an isolated evolutionary substrate below. Each organism launches a separate single-domain SimulationWorld with its own regime sequence, physical controls, and telemetry.",
+                    "Select an isolated single-domain sandbox (Domains 1-3) or launch the coupled 4.25 Ga PlanetaryBiosphere engine (Domain 4) with live biogeochemical feedbacks and the 8-Epoch Grand Trajectory.",
                 )
                 .color(egui::Color32::from_rgb(186, 198, 218)),
             );
@@ -243,21 +324,133 @@ impl ItmeGuiApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(10.0);
-            ui.columns(3, |cols| {
-                for (idx, &org) in OrganismKind::ALL.iter().enumerate() {
-                    let (badge, subtitle, accent, highlights, dynamics_note) = Self::domain_card_meta(org);
-                    let col_ui = &mut cols[idx];
-                    let inner_w = (col_ui.available_width() - 36.0).max(220.0);
+            ui.add_space(8.0);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.columns(4, |cols| {
+                    for (idx, &org) in OrganismKind::ALL.iter().enumerate() {
+                        let (badge, subtitle, accent, highlights, dynamics_note) = Self::domain_card_meta(org);
+                        let col_ui = &mut cols[idx];
+                        let inner_w = (col_ui.available_width() - 26.0).max(170.0);
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(19, 27, 46))
+                            .stroke(egui::Stroke::new(1.5_f32, accent))
+                            .rounding(10.0)
+                            .inner_margin(egui::Margin::same(12.0))
+                            .show(col_ui, |card| {
+                                card.set_min_width(inner_w);
+                                card.set_max_width(inner_w);
+                                card.set_min_height(430.0);
+
+                                card.label(
+                                    egui::RichText::new(badge)
+                                        .small()
+                                        .strong()
+                                        .color(accent),
+                                );
+                                card.add_space(2.0);
+                                card.heading(
+                                    egui::RichText::new(org.title())
+                                        .size(16.5)
+                                        .strong()
+                                        .color(egui::Color32::from_rgb(241, 245, 249)),
+                                );
+                                card.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(subtitle)
+                                            .small()
+                                            .italics()
+                                            .color(egui::Color32::from_rgb(148, 163, 184)),
+                                    )
+                                    .wrap(),
+                                );
+                                card.add_space(6.0);
+                                card.separator();
+                                card.add_space(4.0);
+
+                                card.strong(egui::RichText::new("Symbol Alphabet").color(accent));
+                                card.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(org.alphabet_description())
+                                            .small()
+                                            .monospace()
+                                            .color(egui::Color32::from_rgb(203, 213, 225)),
+                                    )
+                                    .wrap(),
+                                );
+                                card.add_space(6.0);
+
+                                card.strong(egui::RichText::new("Domain Regimes & Phenomena").color(accent));
+                                for h in highlights {
+                                    card.horizontal(|row| {
+                                        row.label(egui::RichText::new("•").strong().color(accent));
+                                        row.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(*h)
+                                                    .small()
+                                                    .color(egui::Color32::from_rgb(215, 224, 238)),
+                                            )
+                                            .wrap(),
+                                        );
+                                    });
+                                }
+
+                                card.add_space(6.0);
+                                card.strong(egui::RichText::new("Isolated Sandbox").color(accent));
+                                card.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(dynamics_note)
+                                            .small()
+                                            .color(egui::Color32::from_rgb(162, 178, 204)),
+                                    )
+                                    .wrap(),
+                                );
+
+                                card.add_space(10.0);
+                                card.strong(
+                                    egui::RichText::new(format!(
+                                        "Preview {}: {}",
+                                        menu.initial_regime.code(),
+                                        menu.initial_regime.domain_name(org)
+                                    ))
+                                    .small()
+                                    .color(egui::Color32::from_rgb(226, 232, 240)),
+                                );
+                                card.add_space(6.0);
+
+                                let launch_btn = egui::Button::new(
+                                    egui::RichText::new(format!("Launch {} ->", org.short_title()))
+                                        .size(13.5)
+                                        .strong()
+                                        .color(egui::Color32::from_rgb(10, 15, 28)),
+                                )
+                                .fill(accent);
+                                if card.add_sized([inner_w, 34.0], launch_btn).clicked() {
+                                    let seed = menu.parsed_seed();
+                                    launched = Some(DomainSession::new(
+                                        org,
+                                        menu.initial_regime,
+                                        menu.mode,
+                                        menu.steps_per_stage,
+                                        seed,
+                                    ));
+                                }
+                            });
+                    }
+
+                    // Card 4: Coupled 4.25 Ga PlanetaryBiosphere
+                    let (badge, title, subtitle, accent, highlights, dynamics_note) =
+                        Self::biosphere_card_meta();
+                    let col_ui = &mut cols[3];
+                    let inner_w = (col_ui.available_width() - 26.0).max(170.0);
                     egui::Frame::none()
-                        .fill(egui::Color32::from_rgb(19, 27, 46))
+                        .fill(egui::Color32::from_rgb(16, 29, 44))
                         .stroke(egui::Stroke::new(1.5_f32, accent))
                         .rounding(10.0)
-                        .inner_margin(egui::Margin::same(16.0))
+                        .inner_margin(egui::Margin::same(12.0))
                         .show(col_ui, |card| {
                             card.set_min_width(inner_w);
                             card.set_max_width(inner_w);
-                            card.set_min_height(460.0);
+                            card.set_min_height(430.0);
 
                             card.label(
                                 egui::RichText::new(badge)
@@ -267,8 +460,8 @@ impl ItmeGuiApp {
                             );
                             card.add_space(2.0);
                             card.heading(
-                                egui::RichText::new(org.title())
-                                    .size(18.0)
+                                egui::RichText::new(title)
+                                    .size(16.5)
                                     .strong()
                                     .color(egui::Color32::from_rgb(241, 245, 249)),
                             );
@@ -281,23 +474,23 @@ impl ItmeGuiApp {
                                 )
                                 .wrap(),
                             );
-                            card.add_space(8.0);
-                            card.separator();
                             card.add_space(6.0);
+                            card.separator();
+                            card.add_space(4.0);
 
-                            card.strong(egui::RichText::new("Symbol Alphabet").color(accent));
+                            card.strong(egui::RichText::new("Planetary Reservoirs").color(accent));
                             card.add(
                                 egui::Label::new(
-                                    egui::RichText::new(org.alphabet_description())
+                                    egui::RichText::new("O2 | CO2 ppm | N/P | Gibbs Bits | Exergy")
                                         .small()
                                         .monospace()
                                         .color(egui::Color32::from_rgb(203, 213, 225)),
                                 )
                                 .wrap(),
                             );
-                            card.add_space(8.0);
+                            card.add_space(6.0);
 
-                            card.strong(egui::RichText::new("Domain Regimes & Phenomena").color(accent));
+                            card.strong(egui::RichText::new("Coupled Trajectory & Gaia-2.0").color(accent));
                             for h in highlights {
                                 card.horizontal(|row| {
                                     row.label(egui::RichText::new("•").strong().color(accent));
@@ -312,8 +505,8 @@ impl ItmeGuiApp {
                                 });
                             }
 
-                            card.add_space(8.0);
-                            card.strong(egui::RichText::new("Independent Dynamics").color(accent));
+                            card.add_space(6.0);
+                            card.strong(egui::RichText::new("Coupled Biogeochemistry").color(accent));
                             card.add(
                                 egui::Label::new(
                                     egui::RichText::new(dynamics_note)
@@ -323,29 +516,28 @@ impl ItmeGuiApp {
                                 .wrap(),
                             );
 
-                            card.add_space(14.0);
+                            card.add_space(10.0);
                             card.strong(
                                 egui::RichText::new(format!(
-                                    "Preview Regime {}: {}",
+                                    "Preview {}: {}",
                                     menu.initial_regime.code(),
-                                    menu.initial_regime.domain_name(org)
+                                    menu.initial_regime.name()
                                 ))
                                 .small()
                                 .color(egui::Color32::from_rgb(226, 232, 240)),
                             );
-                            card.add_space(8.0);
+                            card.add_space(6.0);
 
                             let launch_btn = egui::Button::new(
-                                egui::RichText::new(format!("Launch {} Simulation ->", org.short_title()))
-                                    .size(14.0)
+                                egui::RichText::new("Launch 4.25 Ga Biosphere ->")
+                                    .size(13.5)
                                     .strong()
                                     .color(egui::Color32::from_rgb(10, 15, 28)),
                             )
                             .fill(accent);
                             if card.add_sized([inner_w, 34.0], launch_btn).clicked() {
                                 let seed = menu.parsed_seed();
-                                launched = Some(DomainSession::new(
-                                    org,
+                                launched = Some(DomainSession::new_coupled_biosphere(
                                     menu.initial_regime,
                                     menu.mode,
                                     menu.steps_per_stage,
@@ -353,7 +545,7 @@ impl ItmeGuiApp {
                                 ));
                             }
                         });
-                }
+                });
             });
         });
 
@@ -399,11 +591,13 @@ impl DomainSession {
             steps_per_stage,
             seed,
         );
+        world.coupled_biosphere_mode = false;
         world.controls = initial_regime.domain_preset_controls(organism);
         world.step();
 
         Self {
             organism,
+            coupled_biosphere: false,
             world,
             viewport_layout: ViewportLayout::SpatialAndPhylogeny,
             camera: Camera3D::default(),
@@ -415,6 +609,49 @@ impl DomainSession {
             export_status: None,
             grand_epochs: Vec::new(),
             wants_main_menu: false,
+            wants_about: false,
+        }
+    }
+
+    fn new_coupled_biosphere(
+        initial_regime: RegimeId,
+        mode: SimulationMode,
+        steps_per_stage: usize,
+        seed: u64,
+    ) -> Self {
+        let mut world = SimulationWorld::new(
+            OrganismKind::ArtificialIntelligence,
+            initial_regime,
+            mode,
+            steps_per_stage,
+            seed,
+        );
+        world.coupled_biosphere_mode = true;
+        world.controls = initial_regime.preset_controls();
+        if initial_regime >= RegimeId::R30FullyDarwinian {
+            world.controls.biogeochemical_feedback_gain =
+                world.controls.biogeochemical_feedback_gain.max(0.65);
+            world.controls.planetary_stewardship_coupling =
+                world.controls.planetary_stewardship_coupling.max(0.75);
+        }
+        world.biosphere = PlanetaryBiosphere::new_for_controls(&world.controls);
+        world.step();
+
+        Self {
+            organism: OrganismKind::ArtificialIntelligence,
+            coupled_biosphere: true,
+            world,
+            viewport_layout: ViewportLayout::SpatialAndPhylogeny,
+            camera: Camera3D::default(),
+            auto_rotate: true,
+            show_labels: true,
+            paused: false,
+            steps_per_second: 8.0,
+            last_step_instant: Instant::now(),
+            export_status: None,
+            grand_epochs: Vec::new(),
+            wants_main_menu: false,
+            wants_about: false,
         }
     }
 
@@ -422,28 +659,59 @@ impl DomainSession {
         let prev_reg = self.world.target_regime;
         self.world.step();
         if self.world.mode == SimulationMode::GuidedCurriculum && self.world.target_regime != prev_reg {
-            self.world.controls = self.world.target_regime.domain_preset_controls(self.organism);
+            if self.coupled_biosphere {
+                self.world.controls = self.world.target_regime.preset_controls();
+                if self.world.target_regime >= RegimeId::R30FullyDarwinian {
+                    self.world.controls.biogeochemical_feedback_gain =
+                        self.world.controls.biogeochemical_feedback_gain.max(0.65);
+                }
+            } else {
+                self.world.controls = self.world.target_regime.domain_preset_controls(self.organism);
+            }
         }
     }
 
     fn jump_to_regime(&mut self, regime: RegimeId) {
         let preserve = regime.index() >= 2;
         self.world.apply_regime_preset(regime, preserve);
-        self.world.controls = regime.domain_preset_controls(self.organism);
+        if self.coupled_biosphere {
+            self.world.controls = regime.preset_controls();
+            if regime >= RegimeId::R30FullyDarwinian {
+                self.world.controls.biogeochemical_feedback_gain =
+                    self.world.controls.biogeochemical_feedback_gain.max(0.65);
+                self.world.controls.planetary_stewardship_coupling =
+                    self.world.controls.planetary_stewardship_coupling.max(0.75);
+            }
+        } else {
+            self.world.controls = regime.domain_preset_controls(self.organism);
+        }
         self.world.step();
     }
 
-    fn export_snapshot_files(&mut self) {
-        let slug = self.organism.slug();
-        let step = self.world.step_count;
-        let nhx_file = format!("itme_{slug}_step{step}.nhx");
-        let svg_file = format!("itme_{slug}_step{step}_phylogram.svg");
-        let nhx_res = fs::write(&nhx_file, self.world.export_newick(true));
-        let svg_res = fs::write(&svg_file, self.world.export_phylogram_svg());
-        self.export_status = Some(match (nhx_res, svg_res) {
-            (Ok(()), Ok(())) => format!("Saved {nhx_file} & {svg_file}"),
-            (Err(e), _) | (_, Err(e)) => format!("Export error: {e}"),
-        });
+    fn save_text_with_dialog(
+        &mut self,
+        default_name: &str,
+        filter_name: &str,
+        extension: &str,
+        contents: &str,
+    ) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_file_name(default_name)
+            .add_filter(filter_name, &[extension])
+            .save_file()
+        {
+            match fs::write(&path, contents) {
+                Ok(()) => {
+                    self.export_status = Some((format!("Saved {}", path.display()), false));
+                }
+                Err(e) => {
+                    self.export_status =
+                        Some((format!("Export error ({}): {e}", path.display()), true));
+                }
+            }
+        } else {
+            self.export_status = Some(("Export cancelled.".to_string(), false));
+        }
     }
 
     fn draw_panels(&mut self, ctx: &egui::Context) {
@@ -466,12 +734,16 @@ impl DomainSession {
                 }
                 ui.separator();
 
-                let (_, _, accent, _, _) = ItmeGuiApp::domain_card_meta(self.organism);
-                ui.label(
-                    egui::RichText::new(format!("ITME v23.0 • {}", self.organism.title()))
-                        .color(accent)
-                        .strong(),
-                );
+                let (title_text, accent) = if self.coupled_biosphere {
+                    (
+                        "ITME v23.0 • 4.25 Ga PlanetaryBiosphere".to_string(),
+                        egui::Color32::from_rgb(52, 211, 153),
+                    )
+                } else {
+                    let (_, _, accent, _, _) = ItmeGuiApp::domain_card_meta(self.organism);
+                    (format!("ITME v23.0 • {}", self.organism.title()), accent)
+                };
+                ui.label(egui::RichText::new(title_text).color(accent).strong());
                 ui.separator();
 
                 let play_label = if self.paused { "Play" } else { "Pause" };
@@ -482,8 +754,38 @@ impl DomainSession {
                 if ui.button("Step").clicked() {
                     self.step_once();
                 }
-                if ui.button("Export NHX+SVG").clicked() {
-                    self.export_snapshot_files();
+                let slug = if self.coupled_biosphere {
+                    "planetary_biosphere"
+                } else {
+                    self.organism.slug()
+                };
+                let step = self.world.step_count;
+                if ui.button("Export CSV").clicked() {
+                    let csv_data = if self.coupled_biosphere
+                        && !self.grand_epochs.is_empty()
+                        && self.viewport_layout == ViewportLayout::GrandTrajectory
+                    {
+                        SimulationWorld::export_grand_trajectory_csv(&self.grand_epochs)
+                    } else {
+                        self.world.export_history_csv()
+                    };
+                    let fname = format!("itme_{slug}_step{step}.csv");
+                    self.save_text_with_dialog(&fname, "CSV Telemetry", "csv", &csv_data);
+                }
+                if ui.button("Export Stage Atlas SVG").clicked() {
+                    let atlas_svg = self.world.build_stage_atlas_svg();
+                    let fname = format!("itme_{slug}_stage_atlas.svg");
+                    self.save_text_with_dialog(&fname, "SVG Vector Graphics", "svg", &atlas_svg);
+                }
+                if ui.button("Export NHX").clicked() {
+                    let nhx = self.world.export_newick(true);
+                    let fname = format!("itme_{slug}_step{step}.nhx");
+                    self.save_text_with_dialog(&fname, "Extended Newick", "nhx", &nhx);
+                }
+                if ui.button("Export Phylogram SVG").clicked() {
+                    let phylo_svg = self.world.export_phylogram_svg();
+                    let fname = format!("itme_{slug}_step{step}_phylogram.svg");
+                    self.save_text_with_dialog(&fname, "SVG Phylogram", "svg", &phylo_svg);
                 }
                 ui.add(
                     egui::Slider::new(&mut self.steps_per_second, 1.0..=30.0)
@@ -518,7 +820,7 @@ impl DomainSession {
                     ViewportLayout::Blueprint2D,
                     "2D Blueprint",
                 );
-                if self.organism == OrganismKind::RnaDnaProtein {
+                if self.coupled_biosphere {
                     ui.selectable_value(
                         &mut self.viewport_layout,
                         ViewportLayout::GrandTrajectory,
@@ -529,128 +831,212 @@ impl DomainSession {
                 ui.separator();
                 ui.checkbox(&mut self.auto_rotate, "Auto-Orbit");
                 ui.checkbox(&mut self.show_labels, "Labels");
+
+                ui.separator();
+                ui.label(
+                    egui::RichText::new("Copyright CRV Science Network")
+                        .small()
+                        .color(egui::Color32::from_rgb(168, 184, 208)),
+                );
+                if ui.button("About").clicked() {
+                    self.wants_about = true;
+                }
             });
 
             ui.add_space(2.0);
             ui.horizontal_wrapped(|ui| {
                 ui.label(
-                    egui::RichText::new("Domain Milestones:")
-                        .small()
-                        .strong()
-                        .color(egui::Color32::from_rgb(148, 163, 184)),
+                    egui::RichText::new(if self.coupled_biosphere {
+                        "Biosphere Milestones:"
+                    } else {
+                        "Domain Milestones:"
+                    })
+                    .small()
+                    .strong()
+                    .color(egui::Color32::from_rgb(148, 163, 184)),
                 );
-                match self.organism {
-                    OrganismKind::RnaDnaProtein => {
-                        if ui.button("4.25 Ga Grand Trajectory").clicked() {
-                            let epochs = self.world.run_continuous_grand_trajectory(10);
-                            self.grand_epochs = epochs.clone();
-                            self.viewport_layout = ViewportLayout::GrandTrajectory;
-                            if let Some(last_ep) = epochs.last() {
-                                self.export_status = Some(format!(
+                if self.coupled_biosphere {
+                    if ui.button("4.25 Ga Grand Trajectory").clicked() {
+                        let epochs = self.world.run_continuous_grand_trajectory(10);
+                        self.grand_epochs = epochs.clone();
+                        self.viewport_layout = ViewportLayout::GrandTrajectory;
+                        if let Some(last_ep) = epochs.last() {
+                            self.export_status = Some((
+                                format!(
                                     "8-Epoch Trajectory -> {}: L_I={:.2}, MI={:.1}b, O2={:.2}",
                                     last_ep.epoch.code(),
                                     last_ep.informational_leverage_li,
                                     last_ep.heritable_mutual_info_bits,
                                     last_ep.planetary_o2
+                                ),
+                                false,
+                            ));
+                        }
+                    }
+                    if ui.button("Gaia-2.0 Awakening").clicked() {
+                        self.world.controls.biogeochemical_feedback_gain =
+                            self.world.controls.biogeochemical_feedback_gain.max(0.85);
+                        self.world.controls.planetary_stewardship_coupling =
+                            self.world.controls.planetary_stewardship_coupling.max(0.92);
+                        self.world.controls.extractive_burn_intensity =
+                            self.world.controls.extractive_burn_intensity.min(0.18);
+                        let (_, aw_n, ex_b) = self.world.trigger_planetary_awakening_pulse();
+                        self.export_status = Some((
+                            format!(
+                                "Gaia-2.0 Awakening: {aw_n} co-regulated units | O2={:.2}, CO2={:.0}ppm, Exergy={ex_b:.2}",
+                                self.world.biosphere.atmospheric_o2,
+                                self.world.biosphere.atmospheric_co2_ppm
+                            ),
+                            false,
+                        ));
+                    }
+                    if ui.button("Extractive CO2 Overshoot").clicked() {
+                        self.world.controls.biogeochemical_feedback_gain = 0.85;
+                        self.world.controls.planetary_stewardship_coupling = 0.08;
+                        self.world.controls.extractive_burn_intensity = 0.92;
+                        for _ in 0..8 {
+                            self.step_once();
+                        }
+                        self.export_status = Some((
+                            format!(
+                                "Boundary Stress: State={}, CO2={:.0}ppm, Load={:.2}",
+                                self.world.biosphere.state.short_code(),
+                                self.world.biosphere.atmospheric_co2_ppm,
+                                self.world.biosphere.boundary_transgression_load
+                            ),
+                            false,
+                        ));
+                    }
+                } else {
+                    match self.organism {
+                        OrganismKind::RnaDnaProtein => {
+                            if ui.button("Hadean Abiogenesis -> LUCA").clicked() {
+                                let (rf, lc, eig) = self.world.trigger_hadean_abiogenesis_pulse();
+                                self.export_status = Some((
+                                    format!(
+                                        "Hadean Abiogenesis: +{rf} RAF Protocells, +{lc} LUCA (Eigen L_max={eig} nt)"
+                                    ),
+                                    false,
+                                ));
+                            }
+                            if ui.button("Homochiral D/L + SGC").clicked() {
+                                let (hm, sgc, mp) = self.world.trigger_homochiral_sgc_pulse();
+                                self.export_status = Some((
+                                    format!(
+                                        "Homochirality & SGC: +{hm} D-RNA breaks, +{sgc} 20-AA SGC (MP={:.1}%)",
+                                        mp * 100.0
+                                    ),
+                                    false,
+                                ));
+                            }
+                            if ui.button("RNR RNA->T-DNA").clicked() {
+                                let (rn, td, kb) = self.world.trigger_rna_to_dna_virosphere_pulse();
+                                self.export_status = Some((
+                                    format!(
+                                        "RNR & UDG Repair: +{rn} U-DNA, +{td} T-DNA Genomes (Cap={kb:.0} kb)"
+                                    ),
+                                    false,
+                                ));
+                            }
+                            if ui.button("1°/2° Symbio + MRO").clicked() {
+                                let fused = self.world.trigger_endosymbiotic_pulse();
+                                let ser = self.world.trigger_serial_endosymbiosis_pulse();
+                                let (hy, mi, am) = self.world.trigger_mro_reduction_pulse();
+                                self.export_status = Some((
+                                    format!(
+                                        "Symbiosis & MRO: 1°={fused}, Serial={ser:?}, +Hy:{hy} +MitoS:{mi} +SUF(MRO->0):{am}"
+                                    ),
+                                    false,
                                 ));
                             }
                         }
-                        if ui.button("Hadean Abiogenesis -> LUCA").clicked() {
-                            let (rf, lc, eig) = self.world.trigger_hadean_abiogenesis_pulse();
-                            self.export_status = Some(format!(
-                                "Hadean Abiogenesis: +{rf} RAF Protocells, +{lc} LUCA (Eigen L_max={eig} nt)"
-                            ));
-                        }
-                        if ui.button("Homochiral D/L + SGC").clicked() {
-                            let (hm, sgc, mp) = self.world.trigger_homochiral_sgc_pulse();
-                            self.export_status = Some(format!(
-                                "Homochirality & SGC: +{hm} D-RNA breaks, +{sgc} 20-AA SGC (MP={:.1}%)",
-                                mp * 100.0
-                            ));
-                        }
-                        if ui.button("RNR RNA->T-DNA").clicked() {
-                            let (rn, td, kb) = self.world.trigger_rna_to_dna_virosphere_pulse();
-                            self.export_status = Some(format!(
-                                "RNR & UDG Repair: +{rn} U-DNA, +{td} T-DNA Genomes (Cap={kb:.0} kb)"
-                            ));
-                        }
-                        if ui.button("1°/2° Symbio + MRO").clicked() {
-                            let fused = self.world.trigger_endosymbiotic_pulse();
-                            let ser = self.world.trigger_serial_endosymbiosis_pulse();
-                            let (hy, mi, am) = self.world.trigger_mro_reduction_pulse();
-                            self.export_status = Some(format!(
-                                "Symbiosis & MRO: 1°={fused}, Serial={ser:?}, +Hy:{hy} +MitoS:{mi} +SUF(MRO->0):{am}"
-                            ));
-                        }
-                    }
-                    OrganismKind::HominidPopulation => {
-                        if ui.button("Kin Division & Lithic Guilds").clicked() {
-                            self.jump_to_regime(RegimeId::R30FullyDarwinian);
-                            self.export_status = Some(
-                                "Promoted foraging bands to kin-structured lithic guilds R(3.0-DAR)."
-                                    .to_string(),
-                            );
-                        }
-                        if ui.button("Symbolic Teaching + Ratchet").clicked() {
-                            self.world.controls.symbolic_teaching_fidelity =
-                                self.world.controls.symbolic_teaching_fidelity.max(0.90);
-                            self.world.controls.inter_deme_connectivity =
-                                self.world.controls.inter_deme_connectivity.clamp(0.25, 0.55);
-                            let (rt, sym, rec) = self.world.trigger_cultural_ratchet_pulse();
-                            self.export_status = Some(format!(
-                                "Symbolic Culture: +{rt} ratchets, +{sym} pedagogical lineages, +{rec} deme recombinations"
-                            ));
-                        }
-                        if ui.button("Agro-Ectosymbiosis & Crops").clicked() {
-                            let (ag, ob, sh) =
-                                self.world.trigger_agriculture_domestication_pulse();
-                            self.export_status = Some(format!(
-                                "Cultivar Care: +{ag} farming demes, +{ob} clonal crops, {sh} defensive shields"
-                            ));
-                        }
-                        if ui.button("Written Archive + Peer Audit").clicked() {
-                            let (ar, inst, aud) = self.world.trigger_exosomatic_archive_pulse();
-                            self.export_status = Some(format!(
-                                "Written Archives: +{ar} archives, +{inst} peer institutions, {aud} audits"
-                            ));
-                        }
-                    }
-                    OrganismKind::ArtificialIntelligence => {
-                        if ui.button("Container Checkpoint Scale").clicked() {
-                            self.jump_to_regime(RegimeId::R15Replicative);
-                            self.export_status = Some(
-                                "Scaled stateless container weights across cluster R(1.5-RP)."
-                                    .to_string(),
-                            );
-                        }
-                        if ui.button("Adversarial Arena (PBT)").clicked() {
-                            self.jump_to_regime(RegimeId::R30FullyDarwinian);
-                            self.export_status = Some(
-                                "Activated population-based training & adversarial arena R(3.0-DAR)."
-                                    .to_string(),
-                            );
-                        }
-                        if ui.button("Formal Proof Verifier").clicked() {
-                            let (ms, fm, prf) = self.world.trigger_machine_synthesis_pulse();
-                            self.export_status = Some(format!(
-                                "Formal Verifiers: +{ms} compute symbionts, +{fm} verified loops, {prf} proofs checked"
-                            ));
-                        }
-                        if ui.button("Anti-Collapse Safeguard").clicked() {
-                            self.world.controls.empirical_grounding_floor =
-                                self.world.controls.empirical_grounding_floor.max(0.36);
-                            self.world.controls.formal_verifier_strictness =
-                                self.world.controls.formal_verifier_strictness.max(0.92);
-                            self.world.controls.unverified_publish_pressure =
-                                self.world.controls.unverified_publish_pressure.min(0.18);
-                            for _ in 0..4 {
-                                self.step_once();
+                        OrganismKind::HominidPopulation => {
+                            if ui.button("Kin Division & Lithic Guilds").clicked() {
+                                self.jump_to_regime(RegimeId::R30FullyDarwinian);
+                                self.export_status = Some((
+                                    "Promoted foraging bands to kin-structured lithic guilds R(3.0-DAR)."
+                                        .to_string(),
+                                    false,
+                                ));
                             }
-                            let m = self.world.latest_metrics();
-                            self.export_status = Some(format!(
-                                "Anti-Collapse Guard active: empiric floor >= 0.36 | TailDiv = {:.2}, Theorems = {:.1}b",
-                                m.mean_tail_diversity, m.mean_verified_theorem_bits
-                            ));
+                            if ui.button("Symbolic Teaching + Ratchet").clicked() {
+                                self.world.controls.symbolic_teaching_fidelity =
+                                    self.world.controls.symbolic_teaching_fidelity.max(0.90);
+                                self.world.controls.inter_deme_connectivity =
+                                    self.world.controls.inter_deme_connectivity.clamp(0.25, 0.55);
+                                let (rt, sym, rec) = self.world.trigger_cultural_ratchet_pulse();
+                                self.export_status = Some((
+                                    format!(
+                                        "Symbolic Culture: +{rt} ratchets, +{sym} pedagogical lineages, +{rec} deme recombinations"
+                                    ),
+                                    false,
+                                ));
+                            }
+                            if ui.button("Agro-Ectosymbiosis & Crops").clicked() {
+                                let (ag, ob, sh) =
+                                    self.world.trigger_agriculture_domestication_pulse();
+                                self.export_status = Some((
+                                    format!(
+                                        "Cultivar Care: +{ag} farming demes, +{ob} clonal crops, {sh} defensive shields"
+                                    ),
+                                    false,
+                                ));
+                            }
+                            if ui.button("Written Archive + Peer Audit").clicked() {
+                                let (ar, inst, aud) = self.world.trigger_exosomatic_archive_pulse();
+                                self.export_status = Some((
+                                    format!(
+                                        "Written Archives: +{ar} archives, +{inst} peer institutions, {aud} audits"
+                                    ),
+                                    false,
+                                ));
+                            }
+                        }
+                        OrganismKind::ArtificialIntelligence => {
+                            if ui.button("Container Checkpoint Scale").clicked() {
+                                self.jump_to_regime(RegimeId::R15Replicative);
+                                self.export_status = Some((
+                                    "Scaled stateless container weights across cluster R(1.5-RP)."
+                                        .to_string(),
+                                    false,
+                                ));
+                            }
+                            if ui.button("Adversarial Arena (PBT)").clicked() {
+                                self.jump_to_regime(RegimeId::R30FullyDarwinian);
+                                self.export_status = Some((
+                                    "Activated population-based training & adversarial arena R(3.0-DAR)."
+                                        .to_string(),
+                                    false,
+                                ));
+                            }
+                            if ui.button("Formal Proof Verifier").clicked() {
+                                let (ms, fm, prf) = self.world.trigger_machine_synthesis_pulse();
+                                self.export_status = Some((
+                                    format!(
+                                        "Formal Verifiers: +{ms} compute symbionts, +{fm} verified loops, {prf} proofs checked"
+                                    ),
+                                    false,
+                                ));
+                            }
+                            if ui.button("Anti-Collapse Safeguard").clicked() {
+                                self.world.controls.empirical_grounding_floor =
+                                    self.world.controls.empirical_grounding_floor.max(0.36);
+                                self.world.controls.formal_verifier_strictness =
+                                    self.world.controls.formal_verifier_strictness.max(0.92);
+                                self.world.controls.unverified_publish_pressure =
+                                    self.world.controls.unverified_publish_pressure.min(0.18);
+                                for _ in 0..4 {
+                                    self.step_once();
+                                }
+                                let m = self.world.latest_metrics();
+                                self.export_status = Some((
+                                    format!(
+                                        "Anti-Collapse Guard active: empiric floor >= 0.36 | TailDiv = {:.2}, Theorems = {:.1}b",
+                                        m.mean_tail_diversity, m.mean_verified_theorem_bits
+                                    ),
+                                    false,
+                                ));
+                            }
                         }
                     }
                 }
@@ -691,12 +1077,20 @@ impl DomainSession {
                     }
 
                     ui.separator();
-                    ui.heading(format!("{} Regimes (13)", self.organism.short_title()));
+                    ui.heading(if self.coupled_biosphere {
+                        "Coupled Biosphere Regimes (13)".to_string()
+                    } else {
+                        format!("{} Regimes (13)", self.organism.short_title())
+                    });
                     let active_classified = self.world.classified_regime;
                     let mut clicked_regime = None;
                     for regime in RegimeId::ALL {
                         let is_curr = regime == active_classified;
-                        let txt = regime.domain_title(self.organism);
+                        let txt = if self.coupled_biosphere {
+                            regime.full_title()
+                        } else {
+                            regime.domain_title(self.organism)
+                        };
                         let rich = if is_curr {
                             egui::RichText::new(txt)
                                 .strong()
@@ -931,6 +1325,52 @@ impl DomainSession {
                     }
 
                     let f_eff = w.controls.effective_fidelity();
+                    if self.coupled_biosphere {
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.heading("Planetary Biogeochemistry & Gaia-2.0");
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut w.controls.biogeochemical_feedback_gain,
+                                    0.0..=1.0,
+                                )
+                                .text("g_bio (Biosphere Coupling)"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut w.controls.planetary_stewardship_coupling,
+                                    0.0..=1.0,
+                                )
+                                .text("s_gaia (Gaia-2.0 Stewardship)"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut w.controls.extractive_burn_intensity,
+                                    0.0..=1.0,
+                                )
+                                .text("b_ext (Extractive Burn)"),
+                            )
+                            .changed();
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut w.controls.ambient_oxygen_level,
+                                    0.02..=0.94,
+                                )
+                                .text("O2_atm (Target O2)"),
+                            )
+                            .changed()
+                        {
+                            w.biosphere.atmospheric_o2 = w.controls.ambient_oxygen_level;
+                            changed = true;
+                        }
+                    }
+
                     ui.add_space(4.0);
                     ui.label(
                         egui::RichText::new(format!(
@@ -961,16 +1401,29 @@ impl DomainSession {
                     let m = w.latest_metrics();
                     let reg = w.classified_regime;
 
-                    ui.heading("Emergent Domain Regime");
+                    ui.heading(if self.coupled_biosphere {
+                        "Emergent Biosphere Regime"
+                    } else {
+                        "Emergent Domain Regime"
+                    });
                     ui.label(
-                        egui::RichText::new(reg.domain_title(self.organism))
-                            .size(15.5)
-                            .strong()
-                            .color(egui::Color32::from_rgb(255, 214, 102)),
+                        egui::RichText::new(if self.coupled_biosphere {
+                            reg.full_title()
+                        } else {
+                            reg.domain_title(self.organism)
+                        })
+                        .size(15.5)
+                        .strong()
+                        .color(egui::Color32::from_rgb(255, 214, 102)),
                     );
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(reg.domain_concept(self.organism)).italics(),
+                            egui::RichText::new(if self.coupled_biosphere {
+                                reg.core_concept()
+                            } else {
+                                reg.domain_concept(self.organism)
+                            })
+                            .italics(),
                         )
                         .wrap(),
                     );
@@ -983,19 +1436,121 @@ impl DomainSession {
                     };
                     ui.colored_label(phase_col, format!("Phase: {}", m.phase.label()));
 
-                    if let Some(ref status) = self.export_status {
+                    if let Some((ref status, is_err)) = self.export_status {
+                        let status_col = if is_err {
+                            egui::Color32::from_rgb(255, 110, 110)
+                        } else {
+                            egui::Color32::from_rgb(130, 245, 205)
+                        };
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(status)
                                     .small()
-                                    .color(egui::Color32::from_rgb(130, 245, 205)),
+                                    .color(status_col),
                             )
                             .wrap(),
                         );
                     }
 
+                    if self.coupled_biosphere {
+                        ui.separator();
+                        ui.heading("Planetary Biosphere Gauges");
+                        let b = &w.biosphere;
+                        let (st_col, st_bg) = match b.state {
+                            PlanetaryState::AnoxicArchean => (
+                                egui::Color32::from_rgb(251, 191, 36),
+                                egui::Color32::from_rgb(45, 34, 16),
+                            ),
+                            PlanetaryState::OxygenatedPhanerozoic => (
+                                egui::Color32::from_rgb(76, 201, 240),
+                                egui::Color32::from_rgb(16, 40, 56),
+                            ),
+                            PlanetaryState::AnthropoceneDisequilibrium => (
+                                egui::Color32::from_rgb(255, 110, 110),
+                                egui::Color32::from_rgb(56, 20, 26),
+                            ),
+                            PlanetaryState::HomeostaticAwakening => (
+                                egui::Color32::from_rgb(52, 211, 153),
+                                egui::Color32::from_rgb(14, 46, 36),
+                            ),
+                        };
+                        egui::Frame::none()
+                            .fill(st_bg)
+                            .stroke(egui::Stroke::new(1.0_f32, st_col))
+                            .rounding(5.0)
+                            .inner_margin(egui::Margin::symmetric(8.0, 4.0))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new("PlanetaryState:")
+                                            .small()
+                                            .color(egui::Color32::from_rgb(203, 213, 225)),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(b.state.short_code())
+                                            .small()
+                                            .strong()
+                                            .color(st_col),
+                                    );
+                                });
+                            });
+                        ui.add_space(4.0);
+                        draw_biosphere_gauge(
+                            ui,
+                            "O2 (atm)",
+                            &format!("{:.3} (GOE>=0.25)", b.atmospheric_o2),
+                            b.atmospheric_o2 as f32,
+                            0.0,
+                            1.0,
+                            Some(0.25),
+                            egui::Color32::from_rgb(76, 201, 240),
+                        );
+                        draw_biosphere_gauge(
+                            ui,
+                            "CO2 ppm",
+                            &format!("{:.0} ppm (Safe<=420)", b.atmospheric_co2_ppm),
+                            b.atmospheric_co2_ppm as f32,
+                            220.0,
+                            1800.0,
+                            Some(420.0),
+                            if b.atmospheric_co2_ppm > 420.0 {
+                                egui::Color32::from_rgb(255, 125, 105)
+                            } else {
+                                egui::Color32::from_rgb(244, 162, 97)
+                            },
+                        );
+                        draw_biosphere_gauge(
+                            ui,
+                            "N/P Pool",
+                            &format!("{:.3}", b.nutrient_pool_np),
+                            b.nutrient_pool_np as f32,
+                            0.0,
+                            1.0,
+                            Some(0.35),
+                            egui::Color32::from_rgb(80, 227, 137),
+                        );
+                        draw_biosphere_gauge(
+                            ui,
+                            "Gibbs Diseq",
+                            &format!("{:.2} bits", b.chemical_disequilibrium_bits),
+                            b.chemical_disequilibrium_bits as f32,
+                            0.0,
+                            26.0,
+                            None,
+                            egui::Color32::from_rgb(167, 139, 250),
+                        );
+                        ui.monospace(format!(
+                            "Exergy: {:.2} | Load: {:.2}",
+                            b.planetary_exergy_budget, b.boundary_transgression_load
+                        ));
+                    }
+
                     ui.separator();
-                    ui.heading(format!("{} Telemetry", self.organism.short_title()));
+                    ui.heading(if self.coupled_biosphere {
+                        "Biosphere Telemetry".to_string()
+                    } else {
+                        format!("{} Telemetry", self.organism.short_title())
+                    });
                     egui::Grid::new("itme_domain_metrics_grid")
                         .striped(true)
                         .num_columns(2)
@@ -1171,21 +1726,32 @@ impl DomainSession {
             .show(ctx, |ui| {
                 let w = &self.world;
                 ui.horizontal(|ui| {
-                    ui.strong(format!("ITME v23.0 Trajectories — {}", self.organism.title()));
+                    let plot_title = if self.coupled_biosphere {
+                        "ITME v23.0 Trajectories — 4.25 Ga PlanetaryBiosphere".to_string()
+                    } else {
+                        format!("ITME v23.0 Trajectories — {}", self.organism.title())
+                    };
+                    ui.strong(plot_title);
                     ui.separator();
                     ui.colored_label(egui::Color32::from_rgb(80, 220, 255), "Order (O)");
-                    match self.organism {
-                        OrganismKind::RnaDnaProtein => {
-                            ui.colored_label(egui::Color32::from_rgb(6, 214, 160), "Hydrogenosomes");
-                            ui.colored_label(egui::Color32::from_rgb(255, 209, 102), "Mitosomes (ISC=1)");
-                        }
-                        OrganismKind::HominidPopulation => {
-                            ui.colored_label(egui::Color32::from_rgb(6, 214, 160), "Cultural Repertoire (bits)");
-                            ui.colored_label(egui::Color32::from_rgb(255, 209, 102), "Written Archive (bits)");
-                        }
-                        OrganismKind::ArtificialIntelligence => {
-                            ui.colored_label(egui::Color32::from_rgb(6, 214, 160), "Verified Theorem Bits");
-                            ui.colored_label(egui::Color32::from_rgb(199, 125, 255), "Tail Diversity (x10)");
+                    if self.coupled_biosphere {
+                        ui.colored_label(egui::Color32::from_rgb(76, 201, 240), "O2 (atm)");
+                        ui.colored_label(egui::Color32::from_rgb(80, 227, 137), "N/P Pool");
+                        ui.colored_label(egui::Color32::from_rgb(167, 139, 250), "Gibbs/26");
+                    } else {
+                        match self.organism {
+                            OrganismKind::RnaDnaProtein => {
+                                ui.colored_label(egui::Color32::from_rgb(6, 214, 160), "Hydrogenosomes");
+                                ui.colored_label(egui::Color32::from_rgb(255, 209, 102), "Mitosomes (ISC=1)");
+                            }
+                            OrganismKind::HominidPopulation => {
+                                ui.colored_label(egui::Color32::from_rgb(6, 214, 160), "Cultural Repertoire (bits)");
+                                ui.colored_label(egui::Color32::from_rgb(255, 209, 102), "Written Archive (bits)");
+                            }
+                            OrganismKind::ArtificialIntelligence => {
+                                ui.colored_label(egui::Color32::from_rgb(6, 214, 160), "Verified Theorem Bits");
+                                ui.colored_label(egui::Color32::from_rgb(199, 125, 255), "Tail Diversity (x10)");
+                            }
                         }
                     }
                 });
@@ -1236,7 +1802,49 @@ impl DomainSession {
                     egui::Color32::from_rgb(175, 190, 220),
                 );
 
-                match self.organism {
+                if self.coupled_biosphere {
+                    draw_series(
+                        &painter,
+                        right_plot,
+                        &w.history,
+                        |m| m.planetary_o2_level as f32,
+                        0.0,
+                        1.0,
+                        egui::Color32::from_rgb(76, 201, 240),
+                    );
+                    draw_series(
+                        &painter,
+                        right_plot,
+                        &w.history,
+                        |m| m.planetary_nutrient_pool as f32,
+                        0.0,
+                        1.0,
+                        egui::Color32::from_rgb(80, 227, 137),
+                    );
+                    draw_series(
+                        &painter,
+                        right_plot,
+                        &w.history,
+                        |m| (m.chemical_disequilibrium_bits as f32) / 26.0,
+                        0.0,
+                        1.0,
+                        egui::Color32::from_rgb(167, 139, 250),
+                    );
+                    painter.text(
+                        right_plot.left_top() + egui::vec2(6.0, 4.0),
+                        egui::Align2::LEFT_TOP,
+                        format!(
+                            "O2={:.2} | N/P={:.2} | Gibbs={:.1}b | CO2={:.0}ppm",
+                            w.biosphere.atmospheric_o2,
+                            w.biosphere.nutrient_pool_np,
+                            w.biosphere.chemical_disequilibrium_bits,
+                            w.biosphere.atmospheric_co2_ppm
+                        ),
+                        egui::FontId::monospace(10.5),
+                        egui::Color32::from_rgb(175, 190, 220),
+                    );
+                } else {
+                    match self.organism {
                     OrganismKind::RnaDnaProtein => {
                         let max_right = w
                             .history
@@ -1336,6 +1944,7 @@ impl DomainSession {
                             egui::Color32::from_rgb(175, 190, 220),
                         );
                     }
+                    }
                 }
             });
     }
@@ -1344,6 +1953,7 @@ impl DomainSession {
         egui::CentralPanel::default().show(ctx, |ui| {
             let avail = ui.available_size();
             let (response, painter) = ui.allocate_painter(avail, egui::Sense::click_and_drag());
+            let hover_pos = response.hover_pos();
 
             if response.dragged() {
                 let d = response.drag_delta();
@@ -1393,7 +2003,14 @@ impl DomainSession {
                         egui::Color32::from_rgb(11, 17, 30),
                         egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(42, 60, 98)),
                     );
-                    paint_spatial_grid(&painter, left_r.shrink(4.0), w, self.show_labels);
+                    let left_sub = left_r.shrink(4.0);
+                    paint_spatial_grid(
+                        &painter,
+                        left_sub,
+                        w,
+                        self.show_labels,
+                        hover_pos.filter(|p| left_sub.contains(*p)),
+                    );
                     paint_phylogram_tree(&painter, right_r.shrink(4.0), w, self.show_labels);
                 }
                 ViewportLayout::SpatialGridAnd3D => {
@@ -1415,25 +2032,48 @@ impl DomainSession {
                         egui::Color32::from_rgb(11, 17, 30),
                         egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(42, 60, 98)),
                     );
-                    paint_spatial_grid(&painter, left_r.shrink(4.0), w, self.show_labels);
-                    paint_scene_3d(&painter, right_r, &scene, &self.camera, self.show_labels);
+                    let left_sub = left_r.shrink(4.0);
+                    paint_spatial_grid(
+                        &painter,
+                        left_sub,
+                        w,
+                        self.show_labels,
+                        hover_pos.filter(|p| left_sub.contains(*p)),
+                    );
+                    paint_scene_3d(
+                        &painter,
+                        right_r,
+                        &scene,
+                        &self.camera,
+                        self.show_labels,
+                        hover_pos.filter(|p| right_r.contains(*p)),
+                    );
                 }
                 ViewportLayout::PhylogenyFull => {
                     paint_phylogram_tree(&painter, full_rect.shrink(8.0), &self.world, self.show_labels);
                 }
                 ViewportLayout::Perspective3D => {
                     let scene = self.world.current_scene();
+                    let sub_r = full_rect.shrink(6.0);
                     paint_scene_3d(
                         &painter,
-                        full_rect.shrink(6.0),
+                        sub_r,
                         &scene,
                         &self.camera,
                         self.show_labels,
+                        hover_pos.filter(|p| sub_r.contains(*p)),
                     );
                 }
                 ViewportLayout::Blueprint2D => {
                     let scene = self.world.current_scene();
-                    paint_scene_2d(&painter, full_rect.shrink(6.0), &scene, self.show_labels);
+                    let sub_r = full_rect.shrink(6.0);
+                    paint_scene_2d(
+                        &painter,
+                        sub_r,
+                        &scene,
+                        self.show_labels,
+                        hover_pos.filter(|p| sub_r.contains(*p)),
+                    );
                 }
                 ViewportLayout::GrandTrajectory => {
                     self.paint_grand_trajectory_viewport(&painter, full_rect);
@@ -1457,7 +2097,7 @@ impl DomainSession {
             painter.text(
                 panel_rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "Click '4.25 Ga -> Gaia-2.0 Grand Run!' in the top bar to execute the 8-Epoch Evolutionary Trajectory.",
+                "Click '4.25 Ga Grand Trajectory' in the top bar to execute the 8-Epoch Evolutionary Trajectory.",
                 egui::FontId::proportional(14.0),
                 egui::Color32::from_rgb(148, 163, 184),
             );
@@ -2165,11 +2805,195 @@ fn paint_framed_box(
     painter.rect_filled(rect.shrink(stroke.width), rounding, fill);
 }
 
+fn draw_biosphere_gauge(
+    ui: &mut egui::Ui,
+    label: &str,
+    value_text: &str,
+    val: f32,
+    min_val: f32,
+    max_val: f32,
+    threshold: Option<f32>,
+    bar_color: egui::Color32,
+) {
+    let span = (max_val - min_val).max(1e-5);
+    let frac = ((val - min_val) / span).clamp(0.0, 1.0);
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(label)
+                .small()
+                .strong()
+                .color(egui::Color32::from_rgb(203, 213, 225)),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(value_text)
+                    .small()
+                    .monospace()
+                    .color(bar_color),
+            );
+        });
+    });
+    let bar_w = ui.available_width().max(60.0);
+    let (bar_rect, _) = ui.allocate_exact_size(egui::vec2(bar_w, 8.0), egui::Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(bar_rect, 3.0, egui::Color32::from_rgb(16, 24, 44));
+    p.rect_stroke(
+        bar_rect,
+        3.0,
+        egui::Stroke::new(0.8_f32, egui::Color32::from_rgb(44, 62, 100)),
+    );
+    let fill_w = (bar_rect.width() * frac).max(if frac > 0.0 { 2.0 } else { 0.0 });
+    let fill_rect =
+        egui::Rect::from_min_size(bar_rect.min, egui::vec2(fill_w, bar_rect.height()));
+    p.rect_filled(fill_rect, 3.0, bar_color);
+    if let Some(th) = threshold {
+        let th_frac = ((th - min_val) / span).clamp(0.0, 1.0);
+        let tx = bar_rect.left() + bar_rect.width() * th_frac;
+        p.line_segment(
+            [
+                egui::pos2(tx, bar_rect.top() - 1.5),
+                egui::pos2(tx, bar_rect.bottom() + 1.5),
+            ],
+            egui::Stroke::new(1.4_f32, egui::Color32::from_rgb(248, 250, 252)),
+        );
+    }
+    ui.add_space(3.0);
+}
+
+pub fn rect_overlaps_any(candidate: egui::Rect, occupied: &[egui::Rect]) -> bool {
+    occupied.iter().any(|r| r.intersects(candidate))
+}
+
+fn clamp_pill_rect(rect: egui::Rect, bounds: egui::Rect) -> egui::Rect {
+    let min_x = bounds.left();
+    let max_x = (bounds.right() - rect.width()).max(min_x);
+    let min_y = bounds.top();
+    let max_y = (bounds.bottom() - rect.height()).max(min_y);
+    let dx = rect.left().clamp(min_x, max_x) - rect.left();
+    let dy = rect.top().clamp(min_y, max_y) - rect.top();
+    rect.translate(egui::vec2(dx, dy))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_pill_label(
+    painter: &egui::Painter,
+    bounds: egui::Rect,
+    anchor: egui::Pos2,
+    align: egui::Align2,
+    text: &str,
+    font: egui::FontId,
+    text_col: egui::Color32,
+    border_col: egui::Color32,
+    occupied: &mut Vec<egui::Rect>,
+    force: bool,
+) -> bool {
+    if text.is_empty() || bounds.width() < 24.0 || bounds.height() < 16.0 {
+        return false;
+    }
+    let galley = painter.layout_no_wrap(text.to_string(), font, text_col);
+    let pad = egui::vec2(5.0, 2.0);
+    let pill_size = galley.size() + pad * 2.0;
+    let safe_bounds = bounds.shrink(3.0);
+
+    let make_rect = |pos: egui::Pos2| -> egui::Rect {
+        let min_x = match align.x() {
+            egui::Align::Min => pos.x,
+            egui::Align::Center => pos.x - pill_size.x * 0.5,
+            egui::Align::Max => pos.x - pill_size.x,
+        };
+        let min_y = match align.y() {
+            egui::Align::Min => pos.y,
+            egui::Align::Center => pos.y - pill_size.y * 0.5,
+            egui::Align::Max => pos.y - pill_size.y,
+        };
+        clamp_pill_rect(
+            egui::Rect::from_min_size(egui::pos2(min_x, min_y), pill_size),
+            safe_bounds,
+        )
+    };
+
+    let base_rect = make_rect(anchor);
+    let chosen_rect = if force || !rect_overlaps_any(base_rect.expand(1.5), occupied) {
+        Some(base_rect)
+    } else {
+        let step = pill_size.y + 4.0;
+        let up_rect = make_rect(anchor + egui::vec2(0.0, -step));
+        if !rect_overlaps_any(up_rect.expand(1.5), occupied) {
+            Some(up_rect)
+        } else {
+            let down_rect = make_rect(anchor + egui::vec2(0.0, step));
+            if !rect_overlaps_any(down_rect.expand(1.5), occupied) {
+                Some(down_rect)
+            } else {
+                None
+            }
+        }
+    };
+
+    let Some(pill_rect) = chosen_rect else {
+        return false;
+    };
+
+    occupied.push(pill_rect);
+    painter.rect_filled(
+        pill_rect,
+        4.0,
+        egui::Color32::from_rgba_unmultiplied(10, 15, 28, 224),
+    );
+    painter.rect_stroke(pill_rect, 4.0, egui::Stroke::new(0.9_f32, border_col));
+    painter.galley(pill_rect.min + pad, galley, text_col);
+    true
+}
+
+fn paint_hover_tooltip(
+    painter: &egui::Painter,
+    bounds: egui::Rect,
+    pos: egui::Pos2,
+    lines: &[&str],
+    accent: egui::Color32,
+) {
+    if lines.is_empty() {
+        return;
+    }
+    let font = egui::FontId::monospace(10.0);
+    let mut galleys = Vec::with_capacity(lines.len());
+    let mut max_w = 0.0_f32;
+    let mut total_h = 0.0_f32;
+    for (idx, line) in lines.iter().enumerate() {
+        let col = if idx == 0 {
+            accent
+        } else {
+            egui::Color32::from_rgb(226, 232, 240)
+        };
+        let g = painter.layout_no_wrap((*line).to_string(), font.clone(), col);
+        max_w = max_w.max(g.size().x);
+        total_h += g.size().y + 2.0;
+        galleys.push((g, col));
+    }
+    let pad = egui::vec2(8.0, 6.0);
+    let box_size = egui::vec2(max_w + pad.x * 2.0, total_h + pad.y * 2.0 - 2.0);
+    let raw_rect = egui::Rect::from_min_size(pos + egui::vec2(14.0, 14.0), box_size);
+    let tip_rect = clamp_pill_rect(raw_rect, bounds.shrink(4.0));
+    painter.rect_filled(
+        tip_rect,
+        6.0,
+        egui::Color32::from_rgba_unmultiplied(8, 13, 24, 242),
+    );
+    painter.rect_stroke(tip_rect, 6.0, egui::Stroke::new(1.2_f32, accent));
+    let mut y = tip_rect.top() + pad.y;
+    for (g, col) in galleys {
+        let h = g.size().y;
+        painter.galley(egui::pos2(tip_rect.left() + pad.x, y), g, col);
+        y += h + 2.0;
+    }
+}
+
 fn paint_spatial_grid(
     painter: &egui::Painter,
     rect: egui::Rect,
     world: &SimulationWorld,
     show_labels: bool,
+    hover_pos: Option<egui::Pos2>,
 ) {
     let painter = &painter.with_clip_rect(rect);
     let m = world.latest_metrics();
@@ -2245,6 +3069,16 @@ fn paint_spatial_grid(
     }
 
     let best_id = world.best_unit().map(|u| u.id);
+    struct SpatialLabelCandidate {
+        anchor: egui::Pos2,
+        text: String,
+        border_col: egui::Color32,
+        is_champ: bool,
+    }
+    let mut label_candidates: Vec<SpatialLabelCandidate> = Vec::new();
+    let mut hovered_unit: Option<(usize, egui::Pos2, f32, f32)> = None;
+    let mut seen_label_keys: Vec<(usize, u8)> = Vec::new();
+
     for (idx, unit) in world.population.iter().enumerate() {
         let jitter_x = (((idx % 3) as f32) - 1.0) * cw * 0.14;
         let jitter_y = ((((idx / 3) % 3) as f32) - 1.0) * ch * 0.14;
@@ -2260,6 +3094,14 @@ fn paint_spatial_grid(
             (cw * 0.26).clamp(3.2, 7.4)
         };
         let fill = egui::Color32::from_rgb(sr, sg, sb);
+
+        if let Some(hp) = hover_pos {
+            let d = center.distance(hp);
+            let hit_r = (rad + 7.0).max(11.0);
+            if d <= hit_r && hovered_unit.map_or(true, |(_, _, _, best_d)| d < best_d) {
+                hovered_unit = Some((idx, center, rad, d));
+            }
+        }
 
         match unit.guild {
             TrophicGuild::Producer => {
@@ -2393,20 +3235,133 @@ fn paint_spatial_grid(
             }
         }
 
-        if show_labels && is_champ {
-            let champ_lbl = match world.organism {
-                OrganismKind::RnaDnaProtein => {
-                    format!("{} {}", unit.guild.short_code(), unit.mro_class.short_code())
+        if show_labels {
+            let key = (unit.species_id, unit.guild as u8);
+            if is_champ || (!seen_label_keys.contains(&key) && seen_label_keys.len() < 6) {
+                if !is_champ {
+                    seen_label_keys.push(key);
                 }
-                OrganismKind::HominidPopulation => format!("Band {}", unit.species_id + 1),
-                OrganismKind::ArtificialIntelligence => format!("Agent {}", unit.species_id + 1),
-            };
-            painter.text(
-                center + egui::vec2(0.0, -rad - 3.5),
+                let lbl = match world.organism {
+                    OrganismKind::RnaDnaProtein => {
+                        let base = format!("{} {}", unit.guild.short_code(), unit.mro_class.short_code());
+                        if is_champ {
+                            format!("* {base}")
+                        } else {
+                            base
+                        }
+                    }
+                    OrganismKind::HominidPopulation => {
+                        if is_champ {
+                            format!("* Band {}", unit.species_id + 1)
+                        } else {
+                            format!("Band {}", unit.species_id + 1)
+                        }
+                    }
+                    OrganismKind::ArtificialIntelligence => {
+                        if is_champ {
+                            format!("* Agent {}", unit.species_id + 1)
+                        } else {
+                            format!("Agent {}", unit.species_id + 1)
+                        }
+                    }
+                };
+                label_candidates.push(SpatialLabelCandidate {
+                    anchor: center + egui::vec2(0.0, -rad - 4.0),
+                    text: lbl,
+                    border_col: if is_champ {
+                        egui::Color32::from_rgb(251, 191, 36)
+                    } else {
+                        fill
+                    },
+                    is_champ,
+                });
+            }
+        }
+    }
+
+    // Post-glyph label pass with dark pill backdrops and AABB overlap culling
+    if show_labels {
+        label_candidates.sort_by_key(|c| !c.is_champ);
+        let mut occupied: Vec<egui::Rect> = Vec::new();
+        for cand in label_candidates {
+            paint_pill_label(
+                painter,
+                rect,
+                cand.anchor,
                 egui::Align2::CENTER_BOTTOM,
-                champ_lbl,
+                &cand.text,
                 egui::FontId::monospace(9.5),
-                egui::Color32::WHITE,
+                if cand.is_champ {
+                    egui::Color32::from_rgb(250, 252, 255)
+                } else {
+                    egui::Color32::from_rgb(215, 226, 245)
+                },
+                cand.border_col,
+                &mut occupied,
+                cand.is_champ,
+            );
+        }
+    }
+
+    // Hover highlight and rich unit / cell tooltip
+    if let Some((u_idx, center, rad, _)) = hovered_unit {
+        let u = &world.population[u_idx];
+        painter.circle_stroke(
+            center,
+            rad + 4.0,
+            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(251, 191, 36)),
+        );
+        let gx = u.grid_x;
+        let gy = u.grid_y;
+        let lev = u.complexity_c / u.structure_s.max(2.0);
+        let l1 = format!(
+            "Unit #{} | Sp {} | {} | MRO:{}",
+            u.id,
+            u.species_id + 1,
+            u.guild.short_code(),
+            u.mro_class.short_code()
+        );
+        let l2 = format!(
+            "S_eff:{:.1}b  C:{:.1}  L_I:{:.2}  Fit:{:.2}",
+            u.structure_s, u.complexity_c, lev, u.fitness
+        );
+        let l3 = format!(
+            "Cell ({},{}) E:{:.2} B:{:.2} N:{:.2} | Endo:{}°",
+            gx,
+            gy,
+            world.grid.local_exergy(gx, gy),
+            world.grid.local_byproduct(gx, gy),
+            world.grid.local_niche(gx, gy),
+            u.endo_tier
+        );
+        if let Some(hp) = hover_pos {
+            paint_hover_tooltip(
+                painter,
+                rect,
+                hp,
+                &[&l1, &l2, &l3],
+                egui::Color32::from_rgb(251, 191, 36),
+            );
+        }
+    } else if let Some(hp) = hover_pos {
+        let grid_box = egui::Rect::from_min_size(origin, egui::vec2(side, side));
+        if grid_box.contains(hp) && cw > 0.0 && ch > 0.0 {
+            let gx = (((hp.x - origin.x) / cw).floor() as usize).min(world.grid.width - 1);
+            let gy = (((hp.y - origin.y) / ch).floor() as usize).min(world.grid.height - 1);
+            let biome = world.grid.biome_at(gx, gy);
+            let l1 = format!("Grid Cell ({gx}, {gy}) [{biome:?}]");
+            let l2 = format!(
+                "Exergy:{:.2}  Byproduct:{:.2}  Niche:{:.2}",
+                world.grid.local_exergy(gx, gy),
+                world.grid.local_byproduct(gx, gy),
+                world.grid.local_niche(gx, gy)
+            );
+            paint_hover_tooltip(
+                painter,
+                rect,
+                hp,
+                &[&l1, &l2],
+                egui::Color32::from_rgb(76, 201, 240),
             );
         }
     }
@@ -2447,7 +3402,9 @@ fn paint_scene_3d(
     scene: &StructureScene,
     camera: &Camera3D,
     show_labels: bool,
+    hover_pos: Option<egui::Pos2>,
 ) {
+    let painter = &painter.with_clip_rect(rect);
     let w = rect.width() as f64;
     let h = rect.height() as f64;
 
@@ -2481,22 +3438,89 @@ fn paint_scene_3d(
     let mut order: Vec<usize> = (0..scene.nodes_3d.len()).collect();
     order.sort_by(|&a, &b| proj[b].1.total_cmp(&proj[a].1));
 
+    struct Label3D {
+        center: egui::Pos2,
+        rad: f32,
+        depth: f64,
+        text: String,
+        col: egui::Color32,
+    }
+    let mut labels_3d: Vec<Label3D> = Vec::new();
+    let mut hovered_node: Option<(usize, egui::Pos2, f32, f32)> = None;
+
     for idx in order {
         let node = &scene.nodes_3d[idx];
-        let (center, _, persp) = proj[idx];
+        let (center, depth, persp) = proj[idx];
         if !rect.contains(center) {
             continue;
         }
         let rad = ((node.radius * persp) as f32).clamp(2.5, 22.0);
         let [r, g, b] = node.color;
-        painter.circle_filled(center, rad, egui::Color32::from_rgb(r, g, b));
-        if show_labels && !node.label.is_empty() && rad >= 4.5 {
-            painter.text(
-                center + egui::vec2(rad + 3.0, -2.0),
+        let node_col = egui::Color32::from_rgb(r, g, b);
+        painter.circle_filled(center, rad, node_col);
+
+        if let Some(hp) = hover_pos {
+            let d = center.distance(hp);
+            let hit_r = (rad + 7.0).max(11.0);
+            if d <= hit_r && hovered_node.map_or(true, |(_, _, _, best_d)| d < best_d) {
+                hovered_node = Some((idx, center, rad, d));
+            }
+        }
+
+        if show_labels && !node.label.is_empty() && rad >= 4.2 {
+            labels_3d.push(Label3D {
+                center,
+                rad,
+                depth,
+                text: node.label.clone(),
+                col: node_col,
+            });
+        }
+    }
+
+    // Post-glyph label pass: closest / largest foreground nodes first, with pill backdrops & AABB overlap culling
+    if show_labels {
+        labels_3d.sort_by(|a, b| a.depth.total_cmp(&b.depth).then_with(|| b.rad.total_cmp(&a.rad)));
+        let mut occupied: Vec<egui::Rect> = Vec::new();
+        for lbl in labels_3d {
+            paint_pill_label(
+                painter,
+                rect,
+                lbl.center + egui::vec2(lbl.rad + 4.0, 0.0),
                 egui::Align2::LEFT_CENTER,
-                &node.label,
-                egui::FontId::monospace(10.0),
-                egui::Color32::from_rgb(222, 232, 252),
+                &lbl.text,
+                egui::FontId::monospace(9.5),
+                egui::Color32::from_rgb(232, 240, 255),
+                lbl.col,
+                &mut occupied,
+                false,
+            );
+        }
+    }
+
+    if let Some((n_idx, center, rad, _)) = hovered_node {
+        let n = &scene.nodes_3d[n_idx];
+        painter.circle_stroke(
+            center,
+            rad + 4.0,
+            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(251, 191, 36)),
+        );
+        let l1 = if n.label.is_empty() {
+            format!("3D Node #{n_idx}")
+        } else {
+            format!("{} (Node #{n_idx})", n.label)
+        };
+        let l2 = format!(
+            "pos=({:.2}, {:.2}, {:.2})  r={:.2}  glow={:.2}",
+            n.pos.x, n.pos.y, n.pos.z, n.radius, n.glow
+        );
+        if let Some(hp) = hover_pos {
+            paint_hover_tooltip(
+                painter,
+                rect,
+                hp,
+                &[&l1, &l2],
+                egui::Color32::from_rgb(251, 191, 36),
             );
         }
     }
@@ -2507,7 +3531,9 @@ fn paint_scene_2d(
     rect: egui::Rect,
     scene: &StructureScene,
     show_labels: bool,
+    hover_pos: Option<egui::Pos2>,
 ) {
+    let painter = &painter.with_clip_rect(rect);
     let plot_r = rect.shrink2(egui::vec2(20.0, 34.0));
     let scale = plot_r.width().min(plot_r.height()) * 0.46;
     let center = plot_r.center();
@@ -2531,20 +3557,207 @@ fn paint_scene_2d(
         }
     }
 
-    for n in &scene.nodes_2d {
+    struct Label2D {
+        pos: egui::Pos2,
+        rad: f32,
+        text: String,
+        col: egui::Color32,
+    }
+    let mut labels_2d: Vec<Label2D> = Vec::new();
+    let mut hovered_node: Option<(usize, egui::Pos2, f32, f32)> = None;
+
+    for (idx, n) in scene.nodes_2d.iter().enumerate() {
         let p = to_screen(n.x, n.y);
         let rad = ((n.radius as f32) * scale).clamp(4.0, 12.0);
         let [r, g, b] = n.color;
-        painter.circle_filled(p, rad, egui::Color32::from_rgb(r, g, b));
+        let col = egui::Color32::from_rgb(r, g, b);
+        painter.circle_filled(p, rad, col);
+
+        if let Some(hp) = hover_pos {
+            let d = p.distance(hp);
+            let hit_r = (rad + 7.0).max(11.0);
+            if d <= hit_r && hovered_node.map_or(true, |(_, _, _, best_d)| d < best_d) {
+                hovered_node = Some((idx, p, rad, d));
+            }
+        }
+
         if show_labels && !n.label.is_empty() {
-            painter.text(
-                p + egui::vec2(0.0, -rad - 6.0),
+            labels_2d.push(Label2D {
+                pos: p,
+                rad,
+                text: n.label.clone(),
+                col,
+            });
+        }
+    }
+
+    if show_labels {
+        let mut occupied: Vec<egui::Rect> = Vec::new();
+        for lbl in labels_2d {
+            paint_pill_label(
+                painter,
+                rect,
+                lbl.pos + egui::vec2(0.0, -lbl.rad - 5.0),
                 egui::Align2::CENTER_BOTTOM,
-                &n.label,
+                &lbl.text,
                 egui::FontId::monospace(9.5),
-                egui::Color32::from_rgb(210, 224, 248),
+                egui::Color32::from_rgb(228, 238, 255),
+                lbl.col,
+                &mut occupied,
+                false,
             );
         }
+    }
+
+    if let Some((n_idx, p, rad, _)) = hovered_node {
+        let n = &scene.nodes_2d[n_idx];
+        painter.circle_stroke(
+            p,
+            rad + 4.0,
+            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(251, 191, 36)),
+        );
+        let l1 = if n.label.is_empty() {
+            format!("2D Node #{n_idx}")
+        } else {
+            format!("{} (2D Node #{n_idx})", n.label)
+        };
+        let l2 = format!("xy=({:.2}, {:.2})  r={:.3}", n.x, n.y, n.radius);
+        if let Some(hp) = hover_pos {
+            paint_hover_tooltip(
+                painter,
+                rect,
+                hp,
+                &[&l1, &l2],
+                egui::Color32::from_rgb(251, 191, 36),
+            );
+        }
+    }
+}
+
+pub fn itme_icon_data() -> egui::IconData {
+    const SIZE: usize = 64;
+    let mut rgba = vec![0u8; SIZE * SIZE * 4];
+    let cx = (SIZE - 1) as f32 * 0.5;
+    let cy = (SIZE - 1) as f32 * 0.5;
+    let r_max = SIZE as f32 * 0.5;
+    let corner = SIZE as f32 * 0.22;
+    let half = SIZE as f32 * 0.48;
+
+    let blend = |rgba: &mut [u8], x: usize, y: usize, r: f32, g: f32, b: f32, a: f32| {
+        if a <= 0.0 {
+            return;
+        }
+        let idx = (y * SIZE + x) * 4;
+        let sa = (a / 255.0).clamp(0.0, 1.0);
+        let da = f32::from(rgba[idx + 3]) / 255.0;
+        let out_a = sa + da * (1.0 - sa);
+        if out_a <= 1e-6 {
+            return;
+        }
+        rgba[idx] = ((r * sa + f32::from(rgba[idx]) * da * (1.0 - sa)) / out_a)
+            .clamp(0.0, 255.0) as u8;
+        rgba[idx + 1] = ((g * sa + f32::from(rgba[idx + 1]) * da * (1.0 - sa)) / out_a)
+            .clamp(0.0, 255.0) as u8;
+        rgba[idx + 2] = ((b * sa + f32::from(rgba[idx + 2]) * da * (1.0 - sa)) / out_a)
+            .clamp(0.0, 255.0) as u8;
+        rgba[idx + 3] = (out_a * 255.0).clamp(0.0, 255.0) as u8;
+    };
+    let dist_seg = |px: f32, py: f32, x1: f32, y1: f32, x2: f32, y2: f32| -> f32 {
+        let (vx, vy) = (x2 - x1, y2 - y1);
+        let (wx, wy) = (px - x1, py - y1);
+        let l2 = vx * vx + vy * vy;
+        let t = if l2 < 1e-9 {
+            0.0
+        } else {
+            ((wx * vx + wy * vy) / l2).clamp(0.0, 1.0)
+        };
+        (px - (x1 + t * vx)).hypot(py - (y1 + t * vy))
+    };
+
+    let root = (0.0_f32, 0.56_f32);
+    let mid = (0.0_f32, 0.10_f32);
+    let left_b = (-0.36_f32, -0.22_f32);
+    let right_b = (0.36_f32, -0.22_f32);
+    let top_c = (0.0_f32, -0.46_f32);
+    let edges = [
+        (root, mid, (56.0_f32, 189.0_f32, 248.0_f32)),
+        (mid, left_b, (52.0, 211.0, 153.0)),
+        (mid, right_b, (167.0, 139.0, 250.0)),
+        (left_b, top_c, (52.0, 211.0, 153.0)),
+        (right_b, top_c, (251.0, 191.0, 36.0)),
+        (left_b, right_b, (244.0, 114.0, 182.0)),
+    ];
+    let nodes = [
+        (root, 0.13_f32, (56.0_f32, 189.0_f32, 248.0_f32)),
+        (mid, 0.14, (251.0, 191.0, 36.0)),
+        (left_b, 0.13, (6.0, 214.0, 160.0)),
+        (right_b, 0.13, (167.0, 139.0, 250.0)),
+        (top_c, 0.15, (130.0, 245.0, 205.0)),
+    ];
+
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let dx = (x as f32 - cx).abs() - (half - corner);
+            let dy = (y as f32 - cy).abs() - (half - corner);
+            let sdf_box = dx.max(0.0).hypot(dy.max(0.0)) + dx.max(dy).min(0.0) - corner;
+            if sdf_box > 1.2 {
+                continue;
+            }
+            let bg_alpha = (1.0 - sdf_box).clamp(0.0, 1.0) * 255.0;
+            let nx = (x as f32 - cx) / r_max;
+            let ny = (y as f32 - cy) / r_max;
+            let rad = nx.hypot(ny);
+            let glow = (1.0 - rad * 1.1).max(0.0);
+            let idx = (y * SIZE + x) * 4;
+            rgba[idx] = (11.0 + 14.0 * glow).clamp(0.0, 255.0) as u8;
+            rgba[idx + 1] = (18.0 + 28.0 * glow).clamp(0.0, 255.0) as u8;
+            rgba[idx + 2] = (34.0 + 48.0 * glow).clamp(0.0, 255.0) as u8;
+            rgba[idx + 3] = bg_alpha.clamp(0.0, 255.0) as u8;
+
+            if sdf_box > -(SIZE as f32) * 0.04 && sdf_box <= 0.5 {
+                blend(&mut rgba, x, y, 56.0, 189.0, 248.0, 130.0);
+            }
+            let ring_d = (rad - 0.72).abs();
+            let ring_w = 0.055_f32.max(1.4 / r_max);
+            if ring_d < ring_w {
+                let t = (nx + 1.0) * 0.5;
+                let a = (1.0 - ring_d / ring_w).max(0.0) * 235.0;
+                blend(
+                    &mut rgba,
+                    x,
+                    y,
+                    56.0 * (1.0 - t) + 52.0 * t,
+                    189.0 * (1.0 - t) + 211.0 * t,
+                    248.0 * (1.0 - t) + 153.0 * t,
+                    a,
+                );
+            }
+            let ew = 0.055_f32.max(1.5 / r_max);
+            for &(p1, p2, col) in &edges {
+                let d = dist_seg(nx, ny, p1.0, p1.1, p2.0, p2.1);
+                if d < ew {
+                    let a = (1.0 - d / ew).max(0.0) * 230.0;
+                    blend(&mut rgba, x, y, col.0, col.1, col.2, a);
+                }
+            }
+            let aa = 0.04_f32.max(1.2 / r_max);
+            for &(np, nr, col) in &nodes {
+                let d = (nx - np.0).hypot(ny - np.1);
+                if d < nr + aa {
+                    let a = ((nr + aa - d) / aa).clamp(0.0, 1.0) * 255.0;
+                    blend(&mut rgba, x, y, col.0, col.1, col.2, a);
+                    if d < nr * 0.45 {
+                        blend(&mut rgba, x, y, 245.0, 250.0, 255.0, 180.0);
+                    }
+                }
+            }
+        }
+    }
+
+    egui::IconData {
+        rgba,
+        width: SIZE as u32,
+        height: SIZE as u32,
     }
 }
 
@@ -2553,6 +3766,7 @@ pub fn run_gui(seed: u64) -> Result<(), String> {
         .with_title(
             "ITME v23.0 — Domain-Isolated Biosphere, Hominid & AI Evolutionary Simulator",
         )
+        .with_icon(Arc::new(itme_icon_data()))
         .with_inner_size(egui::vec2(1600.0, 940.0))
         .with_min_inner_size(egui::vec2(980.0, 640.0))
         .with_resizable(true);
@@ -2638,9 +3852,25 @@ pub fn run_screenshot(out_path: &str, seed: u64, view_idx: u8) -> Result<(), Str
             session.paused = true;
             app.screen = AppScreen::Simulation(Box::new(session));
         }
+        4 => {
+            let mut session = DomainSession::new_coupled_biosphere(
+                RegimeId::R35Symbiogenetic,
+                SimulationMode::OrganicSandbox,
+                32,
+                seed + 404,
+            );
+            let epochs = session.world.run_continuous_grand_trajectory(10);
+            session.grand_epochs = epochs;
+            for _ in 0..8 {
+                session.step_once();
+            }
+            session.viewport_layout = ViewportLayout::GrandTrajectory;
+            session.paused = true;
+            app.screen = AppScreen::Simulation(Box::new(session));
+        }
         other => {
             return Err(format!(
-                "Unsupported --screenshot-view {other} (expected 1 = Main Menu, 2 = Molecular Domain, 3 = AI Domain)"
+                "Unsupported --screenshot-view {other} (expected 1 = Main Menu, 2 = Molecular Domain, 3 = AI Domain, 4 = Coupled PlanetaryBiosphere)"
             ));
         }
     }
@@ -2848,58 +4078,72 @@ fn write_rgba_png(path: &std::path::Path, width: u32, height: u32, rgba: &[u8]) 
             fs::create_dir_all(parent).map_err(|e| format!("mkdir failed: {e}"))?;
         }
     }
-    fn crc32(bytes: &[u8]) -> u32 {
-        let mut c = !0u32;
-        for &b in bytes {
-            c ^= u32::from(b);
-            for _ in 0..8 {
-                c = (c >> 1) ^ (0xEDB8_8320 & (0u32.wrapping_sub(c & 1)));
-            }
-        }
-        !c
-    }
-    fn push_chunk(out: &mut Vec<u8>, tag: &[u8; 4], data: &[u8]) {
-        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
-        let start = out.len();
-        out.extend_from_slice(tag);
-        out.extend_from_slice(data);
-        out.extend_from_slice(&crc32(&out[start..]).to_be_bytes());
-    }
-    let row_bytes = (width as usize) * 4;
-    let mut raw = Vec::with_capacity((row_bytes + 1) * (height as usize));
-    for row in rgba.chunks_exact(row_bytes) {
-        raw.push(0);
-        raw.extend_from_slice(row);
-    }
-    let (mut s1, mut s2) = (1u32, 0u32);
-    for &b in &raw {
-        s1 = (s1 + u32::from(b)) % 65521;
-        s2 = (s2 + s1) % 65521;
-    }
-    let mut zlib = Vec::with_capacity(raw.len() + 64);
-    zlib.extend_from_slice(&[0x78, 0x01]);
-    let mut off = 0usize;
-    while off < raw.len() {
-        let end = (off + u16::MAX as usize).min(raw.len());
-        let block = &raw[off..end];
-        let len = block.len() as u16;
-        zlib.push(u8::from(end == raw.len()));
-        zlib.extend_from_slice(&len.to_le_bytes());
-        zlib.extend_from_slice(&(!len).to_le_bytes());
-        zlib.extend_from_slice(block);
-        off = end;
-    }
-    zlib.extend_from_slice(&((s2 << 16) | s1).to_be_bytes());
+    let file = fs::File::create(path)
+        .map_err(|e| format!("Failed creating PNG '{}': {e}", path.display()))?;
+    let mut encoder = png::Encoder::new(BufWriter::new(file), width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_compression(png::Compression::High);
+    let mut writer = encoder
+        .write_header()
+        .map_err(|e| format!("Failed writing PNG header '{}': {e}", path.display()))?;
+    writer
+        .write_image_data(rgba)
+        .map_err(|e| format!("Failed writing PNG data '{}': {e}", path.display()))
+}
 
-    let mut png = Vec::with_capacity(zlib.len() + 64);
-    png.extend_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
-    let mut ihdr = [0u8; 13];
-    ihdr[0..4].copy_from_slice(&width.to_be_bytes());
-    ihdr[4..8].copy_from_slice(&height.to_be_bytes());
-    ihdr[8] = 8;
-    ihdr[9] = 6;
-    push_chunk(&mut png, b"IHDR", &ihdr);
-    push_chunk(&mut png, b"IDAT", &zlib);
-    push_chunk(&mut png, b"IEND", &[]);
-    fs::write(path, &png).map_err(|e| format!("Failed writing PNG '{}': {e}", path.display()))
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pill_label_overlap_culling_and_clamping_prevent_collisions() {
+        let bounds = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(320.0, 200.0));
+        let out_of_bounds = egui::Rect::from_min_size(egui::pos2(305.0, -12.0), egui::vec2(60.0, 18.0));
+        let clamped = clamp_pill_rect(out_of_bounds, bounds);
+        assert!(clamped.left() >= bounds.left());
+        assert!(clamped.right() <= bounds.right() + 1e-4);
+        assert!(clamped.top() >= bounds.top());
+        assert!(clamped.bottom() <= bounds.bottom() + 1e-4);
+
+        let ctx = egui::Context::default();
+        let mut raw = egui::RawInput::default();
+        raw.screen_rect = Some(bounds);
+        let mut placed_count = 0usize;
+        let _ = ctx.run(raw, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let painter = ui.painter();
+                let mut occupied = Vec::new();
+                // Place multiple identical-anchor pills: first succeeds, up/down nudges succeed, 4th+ is culled.
+                for idx in 0..5 {
+                    let ok = paint_pill_label(
+                        painter,
+                        bounds,
+                        egui::pos2(160.0, 100.0),
+                        egui::Align2::CENTER_CENTER,
+                        &format!("NodeLabel_{idx}"),
+                        egui::FontId::monospace(10.0),
+                        egui::Color32::WHITE,
+                        egui::Color32::LIGHT_BLUE,
+                        &mut occupied,
+                        false,
+                    );
+                    if ok {
+                        placed_count += 1;
+                    }
+                }
+                assert_eq!(occupied.len(), placed_count);
+                assert!(placed_count <= 3, "only base + up + down slots fit without AABB overlap");
+                for i in 0..occupied.len() {
+                    assert!(bounds.contains_rect(occupied[i]));
+                    for j in (i + 1)..occupied.len() {
+                        assert!(
+                            !occupied[i].intersects(occupied[j]),
+                            "placed pills {i} and {j} must not overlap"
+                        );
+                    }
+                }
+            });
+        });
+    }
 }

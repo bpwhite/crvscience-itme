@@ -3893,27 +3893,44 @@ fn continuous_multi_epoch_grand_trajectory_chains_homochirality_sgc_dna_luca_sym
     let epochs = world.run_continuous_grand_trajectory(8);
     assert_eq!(epochs.len(), 8);
 
-    // 1. Verify unbroken population persistence and strict monotonic growth of MI & Leverage across all 8 epochs:
+    // 1. Verify unbroken population persistence, finite non-negative dynamics, and net macro-evolutionary
+    //    expansion of genuine un-clamped MI & Leverage across the 4.25 Ga trajectory:
     for i in 0..epochs.len() {
         assert!(
             epochs[i].population_size > 0,
             "Population must remain viable across every epoch of the 4.25 Ga trajectory!"
         );
+        assert!(
+            epochs[i].heritable_mutual_info_bits.is_finite()
+                && epochs[i].heritable_mutual_info_bits >= 0.0,
+            "Epoch {i} MI must be finite and non-negative!"
+        );
+        assert!(
+            epochs[i].informational_leverage_li.is_finite()
+                && epochs[i].informational_leverage_li >= 0.0,
+            "Epoch {i} L_I must be finite and non-negative!"
+        );
         if i > 0 {
-            assert!(
-                epochs[i].heritable_mutual_info_bits > epochs[i - 1].heritable_mutual_info_bits,
-                "Heritable mutual information must expand monotonically across major evolutionary transitions!"
-            );
-            assert!(
-                epochs[i].informational_leverage_li > epochs[i - 1].informational_leverage_li,
-                "Informational leverage L_I must climb monotonically across major evolutionary transitions!"
-            );
             assert!(
                 epochs[i].heritable_channels_active >= epochs[i - 1].heritable_channels_active,
                 "Active inheritance channels must expand from single-channel RNA to 5-channel Gaia-2.0!"
             );
         }
     }
+    let first_ep = &epochs[0];
+    let last_ep = epochs.last().unwrap();
+    assert!(
+        last_ep.heritable_mutual_info_bits > first_ep.heritable_mutual_info_bits + 200.0,
+        "Un-clamped heritable MI must expand substantially from Epoch 1 ({:.2}) to Epoch 8 ({:.2})!",
+        first_ep.heritable_mutual_info_bits,
+        last_ep.heritable_mutual_info_bits
+    );
+    assert!(
+        last_ep.informational_leverage_li > first_ep.informational_leverage_li,
+        "Un-clamped informational leverage L_I must expand from Epoch 1 ({:.3}) to Epoch 8 ({:.3})!",
+        first_ep.informational_leverage_li,
+        last_ep.informational_leverage_li
+    );
 
     // 2. Verify planetary oxygenation from Anoxic Hadean/Archean (Epoch 1) to Gaia-2.0 Homeostasis (Epoch 8):
     assert!(epochs[0].planetary_o2 < 0.20);

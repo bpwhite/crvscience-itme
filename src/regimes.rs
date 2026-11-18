@@ -524,9 +524,12 @@ impl RegimeId {
     }
 
     /// Domain-isolated control presets keeping Molecular organelle chemistry, Hominid cultural
-    /// evolution, and AI compute verification strictly separate with zero cross-domain leakage.
+    /// evolution, and AI compute verification strictly separate with zero cross-domain or planetary leakage.
     pub fn domain_preset_controls(self, org: OrganismKind) -> EnvironmentControls {
         let mut c = self.preset_controls();
+        c.biogeochemical_feedback_gain = 0.0;
+        c.planetary_stewardship_coupling = 0.0;
+        c.extractive_burn_intensity = 0.0;
         match org {
             OrganismKind::RnaDnaProtein => {
                 c.symbolic_teaching_fidelity = 0.0;
