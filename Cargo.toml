@@ -2,6 +2,9 @@
 name = "itme_evolution_sim"
 version = "2.3.0"
 edition = "2021"
+authors = ["Bryan P. White <https://crvscience.com>"]
+repository = "https://github.com/bpwhite/crvscience-itme"
+homepage = "https://crvscience.com/apps"
 description = "ITME v23.0 Native Rust Simulation: Continuous 4.25 Ga Multi-Epoch Grand Trajectory chaining Homochirality, SGC, RNA-to-DNA Virosphere, LUCA, Symbiogenesis, Multicellularity, Superorganisms, Exosomatic Archives, Formal AI & Gaia-2.0 Homeostasis"
 license = "GPL-3.0-or-later"
 

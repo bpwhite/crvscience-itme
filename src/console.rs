@@ -90,13 +90,20 @@ pub fn run_grand_trajectory_headless(opts: &ConsoleOptions) -> io::Result<()> {
         );
     }
     if let Some(ref cp) = opts.csv_path {
-        fs::write(Path::new(cp), csv_out)?;
+        write_file_creating_dirs(cp, &csv_out)?;
+        println!("[Export] Wrote ITME v23.0 (v2.3.0) grand trajectory CSV to: {cp}");
+    }
+    if let Some(ref sp) = opts.svg_path {
+        write_file_creating_dirs(sp, &world.build_stage_atlas_svg())?;
+        println!("[Export] Wrote ITME v23.0 (v2.3.0) structural stage atlas SVG to: {sp}");
     }
     if let Some(ref np) = opts.newick_path {
-        fs::write(Path::new(np), world.export_newick(true))?;
+        write_file_creating_dirs(np, &world.export_newick(true))?;
+        println!("[Export] Wrote ITME v23.0 (v2.3.0) Extended Newick (eNewick) networks to: {np}");
     }
-    if let Some(ref sp) = opts.phylo_svg_path {
-        fs::write(Path::new(sp), world.export_phylogram_svg())?;
+    if let Some(ref psp) = opts.phylo_svg_path {
+        write_file_creating_dirs(psp, &world.export_phylogram_svg())?;
+        println!("[Export] Wrote ITME v23.0 (v2.3.0) SVG phylogram to: {psp}");
     }
     Ok(())
 }
@@ -296,19 +303,19 @@ pub fn run_headless(opts: &ConsoleOptions) -> io::Result<()> {
     if let Some(ref path) = opts.csv_path {
         write_file_creating_dirs(path, &csv_buf)?;
         println!(
-            "\n[Export] Wrote ITME v12.0 anaerobic MRO, apicoplast & symbiogenesis CSV to: {}",
+            "\n[Export] Wrote ITME v23.0 (v2.3.0) anaerobic MRO, apicoplast & symbiogenesis CSV to: {}",
             path
         );
     }
 
     if let Some(ref path) = opts.svg_path {
         let svg_doc = render_stage_atlas_svg(
-            "ITME v12.0 Anaerobic MROs (Hydrogenosomes & Mitosomes), Apicoplasts & Endosymbiosis Atlas",
+            "ITME v23.0 (v2.3.0) Anaerobic MROs (Hydrogenosomes & Mitosomes), Apicoplasts & Endosymbiosis Atlas",
             &svg_panels,
         );
         write_file_creating_dirs(path, &svg_doc)?;
         println!(
-            "[Export] Wrote ITME v12.0 3D/2D structural stage atlas SVG to: {}",
+            "[Export] Wrote ITME v23.0 (v2.3.0) 3D/2D structural stage atlas SVG to: {}",
             path
         );
     }
@@ -329,7 +336,7 @@ pub fn run_headless(opts: &ConsoleOptions) -> io::Result<()> {
         );
     }
 
-    println!("\nHeadless ITME v12.0 (v1.2.0) anaerobic MRO, apicoplast & symbiogenesis simulation completed.");
+    println!("\nHeadless ITME v23.0 (v2.3.0) anaerobic MRO, apicoplast & symbiogenesis simulation completed.");
     Ok(())
 }
 

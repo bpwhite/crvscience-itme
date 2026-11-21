@@ -6,14 +6,14 @@
 This directory contains the self-contained LaTeX source (`.tex`) and single-column PDF (`.pdf`) editions for both:
 
 1. **Companion Application Preprint (`APP-PREPRINT-07`)**
-   - **Title:** ITME: Simulating Four Billion Years of Life, Oceans, and Atmosphere Evolution
+   - **Title:** ITME: Modeling Evolutionary Regimes, Contingency, and Substrate Complexity Across Molecular, Hominid, and AI Worlds
    - **Files:** `itme-planetary-biosphere-evolution.tex`, `itme-planetary-biosphere-evolution.pdf`
    - **Canonical Zenodo DOI:** https://doi.org/10.5281/zenodo.24222386
    - **Figshare Mirror:** https://figshare.com/articles/preprint/ITME_Simulating_Four_Billion_Years_of_Life_Oceans_and_Atmosphere_Evolution/35013760
    - **Web Preprint:** https://crvscience.com/apps/preprints/itme-planetary-biosphere-evolution
 
 2. **CRV Science Public Apps Network Overview (`APP-PREPRINT-01`)**
-   - **Title:** The CRV Science App Network: Eighteen Open-Source Rust Programs for Science, Data, and Simulation
+   - **Title:** The CRV Science App Network: Twenty Open-Source Rust Programs for Science, Data, and Simulation
    - **Files:** `crv-science-public-apps-network.tex`, `crv-science-public-apps-network.pdf`
    - **Canonical Zenodo DOI:** https://doi.org/10.5281/zenodo.24222398
    - **Figshare Mirror:** https://figshare.com/articles/preprint/The_CRV_Science_App_Network_Seventeen_Open-Source_Rust_Programs_for_Science_Data_and_Simulation/35013736

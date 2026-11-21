@@ -84,11 +84,17 @@ fn headless_and_grand_trajectory_export_valid_telemetry() {
     let phylo_svg_raw = fs::read_to_string(&phylo_svg_path).expect("read phylo svg");
     assert!(phylo_svg_raw.contains("<svg") && phylo_svg_raw.contains("</svg>"));
 
-    let grand_csv = tmp.0.join("grand.csv");
+    let grand_csv = tmp.0.join("nested_csv/sub/grand.csv");
+    let grand_svg = tmp.0.join("nested_svg/sub/grand_atlas.svg");
+    let grand_newick = tmp.0.join("nested_nhx/sub/grand.enewick");
+    let grand_phylo_svg = tmp.0.join("nested_phylo/sub/grand_phylo.svg");
     let grand_opts = ConsoleOptions {
         steps_per_regime: 12,
         seed: 99,
         csv_path: Some(grand_csv.to_string_lossy().into_owned()),
+        svg_path: Some(grand_svg.to_string_lossy().into_owned()),
+        newick_path: Some(grand_newick.to_string_lossy().into_owned()),
+        phylo_svg_path: Some(grand_phylo_svg.to_string_lossy().into_owned()),
         grand_trajectory: true,
         ..ConsoleOptions::default()
     };
@@ -96,6 +102,12 @@ fn headless_and_grand_trajectory_export_valid_telemetry() {
     let grand_raw = fs::read_to_string(&grand_csv).expect("read grand csv");
     assert!(grand_raw.starts_with("epoch,age_ga,tick_end,"));
     assert!(grand_raw.lines().count() >= 8);
+    let grand_svg_raw = fs::read_to_string(&grand_svg).expect("read grand atlas svg");
+    assert!(grand_svg_raw.starts_with("<svg ") && grand_svg_raw.contains("</svg>"));
+    let grand_nhx_raw = fs::read_to_string(&grand_newick).expect("read grand newick");
+    assert!(grand_nhx_raw.contains(';'));
+    let grand_phylo_raw = fs::read_to_string(&grand_phylo_svg).expect("read grand phylo svg");
+    assert!(grand_phylo_raw.contains("<svg") && grand_phylo_raw.contains("</svg>"));
 }
 
 #[test]

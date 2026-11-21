@@ -34,6 +34,18 @@ use std::io::BufWriter;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+fn add_param_slider(
+    ui: &mut egui::Ui,
+    value: &mut f64,
+    range: std::ops::RangeInclusive<f64>,
+    label: &str,
+    tooltip: &str,
+) -> bool {
+    ui.add(egui::Slider::new(value, range).text(label))
+        .on_hover_text(tooltip)
+        .changed()
+}
+
 const SPECIES_PALETTE: [[u8; 3]; 8] = [
     [90, 235, 255],
     [255, 168, 76],
@@ -74,11 +86,26 @@ impl MainMenuState {
         }
     }
 
+    fn try_parse_seed(&self) -> Result<u64, &'static str> {
+        let trimmed = self.seed_text.trim();
+        if trimmed.is_empty() {
+            return Err("Seed cannot be empty (enter decimal or 0x-prefixed hex u64).");
+        }
+        if let Some(hex) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+            if hex.is_empty() {
+                return Err("Hex seed after 0x cannot be empty.");
+            }
+            u64::from_str_radix(hex, 16)
+                .map_err(|_| "Invalid hexadecimal seed (expected 0x followed by hex digits).")
+        } else {
+            trimmed
+                .parse::<u64>()
+                .map_err(|_| "Invalid decimal seed (expected unsigned integer or 0x hex).")
+        }
+    }
+
     fn parsed_seed(&self) -> u64 {
-        self.seed_text
-            .trim()
-            .parse::<u64>()
-            .unwrap_or(self.seed)
+        self.try_parse_seed().unwrap_or(self.seed)
     }
 }
 
@@ -130,6 +157,12 @@ impl ItmeGuiApp {
     }
 
     fn draw_panels(&mut self, ctx: &egui::Context) {
+        if self.show_about && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_about = false;
+        } else if !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+            self.show_about = !self.show_about;
+        }
+
         let mut next_screen: Option<AppScreen> = None;
         match &mut self.screen {
             AppScreen::MainMenu(menu) => {
@@ -141,7 +174,7 @@ impl ItmeGuiApp {
                 session.draw_panels(ctx);
                 if session.wants_about {
                     session.wants_about = false;
-                    self.show_about = true;
+                    self.show_about = !self.show_about;
                 }
                 if session.wants_main_menu {
                     let seed = self.default_seed;
@@ -278,8 +311,12 @@ impl ItmeGuiApp {
                         .color(egui::Color32::from_rgb(130, 245, 205)),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("About").clicked() {
-                        *show_about = true;
+                    if ui
+                        .button("About")
+                        .on_hover_text("About ITME & CRV Science Network (F1)")
+                        .clicked()
+                    {
+                        *show_about = !*show_about;
                     }
                     ui.separator();
                     ui.label(
@@ -314,7 +351,23 @@ impl ItmeGuiApp {
                 ui.selectable_value(&mut menu.initial_regime, RegimeId::R35Symbiogenetic, "R(3.5) Integrated");
                 ui.separator();
                 ui.label("Seed:");
-                ui.add(egui::TextEdit::singleline(&mut menu.seed_text).desired_width(90.0));
+                let seed_res = menu.try_parse_seed();
+                let seed_resp = ui.add(
+                    egui::TextEdit::singleline(&mut menu.seed_text).desired_width(90.0),
+                );
+                if let Err(err_hint) = seed_res {
+                    seed_resp.on_hover_text(format!("{err_hint} Fallback seed: {}.", menu.seed));
+                    ui.label(
+                        egui::RichText::new(format!("Invalid seed (using {})", menu.seed))
+                            .small()
+                            .color(egui::Color32::from_rgb(248, 113, 113)),
+                    )
+                    .on_hover_text(err_hint);
+                } else {
+                    seed_resp.on_hover_text(
+                        "Deterministic Xoshiro256** PRNG seed (decimal or 0x-prefixed hex).",
+                    );
+                }
                 if menu.mode == SimulationMode::GuidedCurriculum {
                     ui.separator();
                     ui.add(egui::Slider::new(&mut menu.steps_per_stage, 12..=80).text("Ticks/Regime"));
@@ -760,7 +813,11 @@ impl DomainSession {
                     self.organism.slug()
                 };
                 let step = self.world.step_count;
-                if ui.button("Export CSV").clicked() {
+                if ui
+                    .button("Export CSV")
+                    .on_hover_text("Export step-by-step telemetry (or 8-Epoch Grand Trajectory) to CSV.")
+                    .clicked()
+                {
                     let csv_data = if self.coupled_biosphere
                         && !self.grand_epochs.is_empty()
                         && self.viewport_layout == ViewportLayout::GrandTrajectory
@@ -772,17 +829,29 @@ impl DomainSession {
                     let fname = format!("itme_{slug}_step{step}.csv");
                     self.save_text_with_dialog(&fname, "CSV Telemetry", "csv", &csv_data);
                 }
-                if ui.button("Export Stage Atlas SVG").clicked() {
+                if ui
+                    .button("Export Stage Atlas SVG")
+                    .on_hover_text("Export 13-regime 3D/2D structural stage atlas as vector SVG.")
+                    .clicked()
+                {
                     let atlas_svg = self.world.build_stage_atlas_svg();
                     let fname = format!("itme_{slug}_stage_atlas.svg");
                     self.save_text_with_dialog(&fname, "SVG Vector Graphics", "svg", &atlas_svg);
                 }
-                if ui.button("Export NHX").clicked() {
+                if ui
+                    .button("Export NHX")
+                    .on_hover_text("Export Extended Newick (eNewick #H + MRO/APICO/KLEPTO NHX) lineage network.")
+                    .clicked()
+                {
                     let nhx = self.world.export_newick(true);
                     let fname = format!("itme_{slug}_step{step}.nhx");
                     self.save_text_with_dialog(&fname, "Extended Newick", "nhx", &nhx);
                 }
-                if ui.button("Export Phylogram SVG").clicked() {
+                if ui
+                    .button("Export Phylogram SVG")
+                    .on_hover_text("Export reticulate anastomosing evolutionary phylogram as vector SVG.")
+                    .clicked()
+                {
                     let phylo_svg = self.world.export_phylogram_svg();
                     let fname = format!("itme_{slug}_step{step}_phylogram.svg");
                     self.save_text_with_dialog(&fname, "SVG Phylogram", "svg", &phylo_svg);
@@ -838,7 +907,11 @@ impl DomainSession {
                         .small()
                         .color(egui::Color32::from_rgb(168, 184, 208)),
                 );
-                if ui.button("About").clicked() {
+                if ui
+                    .button("About")
+                    .on_hover_text("About ITME & CRV Science Network (F1)")
+                    .clicked()
+                {
                     self.wants_about = true;
                 }
             });
@@ -1112,215 +1185,180 @@ impl DomainSession {
                     let mut changed = false;
 
                     ui.heading("Energetics & Transmission");
-                    changed |= ui
-                        .add(
-                            egui::Slider::new(&mut w.controls.bath_exergy_flux, -0.6..=1.5)
-                                .text("J_in (Supply / Exergy Flux)"),
-                        )
-                        .changed();
-                    changed |= ui
-                        .add(
-                            egui::Slider::new(&mut w.controls.replication_fidelity, 0.40..=1.0)
-                                .text("F_0 (Copy / Update Fidelity)"),
-                        )
-                        .changed();
-                    changed |= ui
-                        .add(
-                            egui::Slider::new(&mut w.controls.landauer_bit_cost, 0.0..=0.008)
-                                .text("k_B T ln2 (Maintenance Cost)"),
-                        )
-                        .changed();
+                    changed |= add_param_slider(
+                        ui,
+                        &mut w.controls.bath_exergy_flux,
+                        -0.6..=1.5,
+                        "J_in (Supply / Exergy Flux)",
+                        "Thermodynamic free-energy / exergy inflow driving dissipative self-organization.",
+                    );
+                    changed |= add_param_slider(
+                        ui,
+                        &mut w.controls.replication_fidelity,
+                        0.40..=1.0,
+                        "F_0 (Copy / Update Fidelity)",
+                        "Baseline per-symbol replication or state-update fidelity before maintenance decay.",
+                    );
+                    changed |= add_param_slider(
+                        ui,
+                        &mut w.controls.landauer_bit_cost,
+                        0.0..=0.008,
+                        "k_B T ln2 (Maintenance Cost)",
+                        "Landauer thermodynamic maintenance cost per heritable bit.",
+                    );
 
                     ui.add_space(4.0);
                     match self.organism {
                         OrganismKind::RnaDnaProtein => {
                             ui.heading("Prebiotic & Genetic Code");
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.wet_dry_cycle_amplitude,
-                                        0.0..=1.0,
-                                    )
-                                    .text("A_wd (Wet-Dry Condensation)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.hydrothermal_delta_ph,
-                                        0.0..=4.5,
-                                    )
-                                    .text("Delta_pH (Vent FeNiS Gradient)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.magnetite_ciss_spin_bias,
-                                        0.0..=1.0,
-                                    )
-                                    .text("b_ciss (Fe3O4 Chiral Spin Bias)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.rnr_thiyl_radical_activity,
-                                        0.0..=1.0,
-                                    )
-                                    .text("k_rnr (Class III RNR 2'-OH->2'-H)"),
-                                )
-                                .changed();
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.wet_dry_cycle_amplitude,
+                                0.0..=1.0,
+                                "A_wd (Wet-Dry Condensation)",
+                                "Tidal/geothermal wet-dry cycling amplitude driving RNA oligomer condensation.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.hydrothermal_delta_ph,
+                                0.0..=4.5,
+                                "Delta_pH (Vent FeNiS Gradient)",
+                                "Alkaline hydrothermal FeNiS proton-motive pH gradient powering Hadean protocells.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.magnetite_ciss_spin_bias,
+                                0.0..=1.0,
+                                "b_ciss (Fe3O4 Chiral Spin Bias)",
+                                "Magnetite chiral-induced spin selectivity (CISS) bias breaking D-RNA/L-AA symmetry.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.rnr_thiyl_radical_activity,
+                                0.0..=1.0,
+                                "k_rnr (Class III RNR 2'-OH->2'-H)",
+                                "Anaerobic Class III ribonucleotide reductase activity converting RNA to T-DNA.",
+                            );
 
                             ui.add_space(4.0);
                             ui.heading("Symbiogenesis & MRO Continuum");
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.endosymbiosis_rate,
-                                        0.0..=0.80,
-                                    )
-                                    .text("gamma_1 (1° Endosymbiosis)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.ambient_oxygen_level,
-                                        0.0..=1.0,
-                                    )
-                                    .text("O2_level (Hypoxia < 0.45)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.cytosolic_suf_hgt_rescue,
-                                        0.0..=1.0,
-                                    )
-                                    .text("suf_rescue (Cytosolic SUF >=0.65)"),
-                                )
-                                .changed();
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.endosymbiosis_rate,
+                                0.0..=0.80,
+                                "gamma_1 (1° Endosymbiosis)",
+                                "Primary endosymbiotic fusion rate integrating bacterial symbionts.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.ambient_oxygen_level,
+                                0.0..=1.0,
+                                "O2_level (Hypoxia < 0.45)",
+                                "Ambient dissolved O2; hypoxia (< 0.45) favors hydrogenosome/mitosome reduction.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.cytosolic_suf_hgt_rescue,
+                                0.0..=1.0,
+                                "suf_rescue (Cytosolic SUF >=0.65)",
+                                "Horizontal transfer of bacterial cytosolic SUF Fe-S assembly enabling MRO->0.",
+                            );
                         }
                         OrganismKind::HominidPopulation => {
                             ui.heading("Cultural Transmission & Demes");
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.symbolic_teaching_fidelity,
-                                        0.0..=1.0,
-                                    )
-                                    .text("f_teach (Symbolic Pedagogy)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.inter_deme_connectivity,
-                                        0.0..=1.0,
-                                    )
-                                    .text("c_deme (Inter-Band Contact)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.cultural_innovation_rate,
-                                        0.0..=0.90,
-                                    )
-                                    .text("mu_innov (Innovation Drive)"),
-                                )
-                                .changed();
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.symbolic_teaching_fidelity,
+                                0.0..=1.0,
+                                "f_teach (Symbolic Pedagogy)",
+                                "Fidelity of active symbolic teaching and cross-generational skill transmission.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.inter_deme_connectivity,
+                                0.0..=1.0,
+                                "c_deme (Inter-Band Contact)",
+                                "Migration and seasonal exchange connectivity across foraging bands and demes.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.cultural_innovation_rate,
+                                0.0..=0.90,
+                                "mu_innov (Innovation Drive)",
+                                "Rate of novel lithic, ecological, or symbolic cultural innovation.",
+                            );
 
                             ui.add_space(4.0);
                             ui.heading("Subsistence & Written Archives");
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.crop_domestication_rate,
-                                        0.0..=0.90,
-                                    )
-                                    .text("mu_crop (Cultivar Domestication)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.archival_externalization_rate,
-                                        0.0..=0.90,
-                                    )
-                                    .text("mu_arch (Written Archival Drive)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.peer_verification_rigor,
-                                        0.0..=1.0,
-                                    )
-                                    .text("r_peer (Peer Replication Rigor)"),
-                                )
-                                .changed();
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.crop_domestication_rate,
+                                0.0..=0.90,
+                                "mu_crop (Cultivar Domestication)",
+                                "Co-evolutionary agro-ectosymbiosis and cultivar selection intensity.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.archival_externalization_rate,
+                                0.0..=0.90,
+                                "mu_arch (Written Archival Drive)",
+                                "Externalization of symbolic memory into durable written records.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.peer_verification_rigor,
+                                0.0..=1.0,
+                                "r_peer (Peer Replication Rigor)",
+                                "Independent verification rigor filtering archival drift and false claims.",
+                            );
                         }
                         OrganismKind::ArtificialIntelligence => {
                             ui.heading("Training, Plasticity & Distillation");
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.synthetic_generation_rate,
-                                        0.0..=1.0,
-                                    )
-                                    .text("g_synth (Synthetic Rollout Rate)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.memory_plasticity,
-                                        0.0..=1.0,
-                                    )
-                                    .text("M_plast (In-Context / LoRA)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.soft_inheritance_coupling,
-                                        0.0..=1.0,
-                                    )
-                                    .text("alpha_distill (Teacher Distillation)"),
-                                )
-                                .changed();
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.synthetic_generation_rate,
+                                0.0..=1.0,
+                                "g_synth (Synthetic Rollout Rate)",
+                                "Fraction of training distribution drawn from self-generated synthetic rollouts.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.memory_plasticity,
+                                0.0..=1.0,
+                                "M_plast (In-Context / LoRA)",
+                                "Test-time and in-context plasticity during deployment.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.soft_inheritance_coupling,
+                                0.0..=1.0,
+                                "alpha_distill (Teacher Distillation)",
+                                "Strength of teacher-to-student behavioral and representation distillation.",
+                            );
 
                             ui.add_space(4.0);
                             ui.heading("Formal Verification & Anti-Collapse");
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.formal_verifier_strictness,
-                                        0.0..=1.0,
-                                    )
-                                    .text("v_formal (Proof Verifier >=0.72)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.empirical_grounding_floor,
-                                        0.0..=0.60,
-                                    )
-                                    .text("gamma_emp (Empirical Anchor >=0.12)"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut w.controls.unverified_publish_pressure,
-                                        0.0..=1.0,
-                                    )
-                                    .text("p_noise (Unverified Publish Rate)"),
-                                )
-                                .changed();
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.formal_verifier_strictness,
+                                0.0..=1.0,
+                                "v_formal (Proof Verifier >=0.72)",
+                                "Strictness of formal theorem verifier gating self-improvement.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.empirical_grounding_floor,
+                                0.0..=0.60,
+                                "gamma_emp (Empirical Anchor >=0.12)",
+                                "Minimum real-world empirical grounding floor preventing tail collapse.",
+                            );
+                            changed |= add_param_slider(
+                                ui,
+                                &mut w.controls.unverified_publish_pressure,
+                                0.0..=1.0,
+                                "p_noise (Unverified Publish Rate)",
+                                "Rate at which unverified synthetic outputs contaminate the corpus.",
+                            );
                         }
                     }
 
@@ -1329,43 +1367,34 @@ impl DomainSession {
                         ui.add_space(6.0);
                         ui.separator();
                         ui.heading("Planetary Biogeochemistry & Gaia-2.0");
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.biogeochemical_feedback_gain,
-                                    0.0..=1.0,
-                                )
-                                .text("g_bio (Biosphere Coupling)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.planetary_stewardship_coupling,
-                                    0.0..=1.0,
-                                )
-                                .text("s_gaia (Gaia-2.0 Stewardship)"),
-                            )
-                            .changed();
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.extractive_burn_intensity,
-                                    0.0..=1.0,
-                                )
-                                .text("b_ext (Extractive Burn)"),
-                            )
-                            .changed();
-                        if ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut w.controls.ambient_oxygen_level,
-                                    0.02..=0.94,
-                                )
-                                .text("O2_atm (Target O2)"),
-                            )
-                            .changed()
-                        {
+                        changed |= add_param_slider(
+                            ui,
+                            &mut w.controls.biogeochemical_feedback_gain,
+                            0.0..=1.0,
+                            "g_bio (Biosphere Coupling)",
+                            "Strength of two-way feedback between organismal metabolism and planetary reservoirs.",
+                        );
+                        changed |= add_param_slider(
+                            ui,
+                            &mut w.controls.planetary_stewardship_coupling,
+                            0.0..=1.0,
+                            "s_gaia (Gaia-2.0 Stewardship)",
+                            "Intentional planetary homeostatic regulation stabilizing O2, CO2, and exergy.",
+                        );
+                        changed |= add_param_slider(
+                            ui,
+                            &mut w.controls.extractive_burn_intensity,
+                            0.0..=1.0,
+                            "b_ext (Extractive Burn)",
+                            "Unregulated extractive carbon oxidation intensity driving CO2 overshoot.",
+                        );
+                        if add_param_slider(
+                            ui,
+                            &mut w.controls.ambient_oxygen_level,
+                            0.02..=0.94,
+                            "O2_atm (Target O2)",
+                            "Target atmospheric oxygen mixing ratio for coupled planetary biosphere runs.",
+                        ) {
                             w.biosphere.atmospheric_o2 = w.controls.ambient_oxygen_level;
                             changed = true;
                         }
@@ -4145,5 +4174,70 @@ mod tests {
                 }
             });
         });
+    }
+
+    #[test]
+    fn main_menu_seed_parsing_handles_decimal_hex_and_invalid() {
+        let mut menu = MainMenuState::new(20250813);
+        assert_eq!(menu.try_parse_seed(), Ok(20250813));
+        assert_eq!(menu.parsed_seed(), 20250813);
+
+        menu.seed_text = "  424242  ".to_string();
+        assert_eq!(menu.try_parse_seed(), Ok(424242));
+        assert_eq!(menu.parsed_seed(), 424242);
+
+        menu.seed_text = "0x1A2B_deadbeef".replace('_', "");
+        assert_eq!(menu.try_parse_seed(), Ok(0x1A2B_deadbeef));
+        assert_eq!(menu.parsed_seed(), 0x1A2B_deadbeef);
+
+        menu.seed_text = "0XFF".to_string();
+        assert_eq!(menu.try_parse_seed(), Ok(255));
+
+        menu.seed_text = "0x".to_string();
+        assert!(menu.try_parse_seed().is_err());
+        assert_eq!(menu.parsed_seed(), 20250813);
+
+        menu.seed_text = "not_a_number".to_string();
+        assert!(menu.try_parse_seed().is_err());
+        assert_eq!(menu.parsed_seed(), 20250813);
+
+        menu.seed_text = "   ".to_string();
+        assert!(menu.try_parse_seed().is_err());
+        assert_eq!(menu.parsed_seed(), 20250813);
+    }
+
+    #[test]
+    fn gui_f1_and_escape_toggle_about_modal_headlessly() {
+        let ctx = egui::Context::default();
+        let mut app = ItmeGuiApp::new_with_ctx(&ctx, 20250813);
+        assert!(!app.show_about);
+
+        let run_key = |app: &mut ItmeGuiApp, key: egui::Key| {
+            let mut raw = egui::RawInput::default();
+            raw.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 900.0),
+            ));
+            raw.events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            let _ = ctx.run(raw, |c| app.draw_panels(c));
+        };
+
+        run_key(&mut app, egui::Key::F1);
+        assert!(app.show_about, "F1 should open About ITME modal");
+
+        run_key(&mut app, egui::Key::Escape);
+        assert!(!app.show_about, "Escape should close About ITME modal");
+
+        run_key(&mut app, egui::Key::F1);
+        assert!(app.show_about);
+
+        run_key(&mut app, egui::Key::F1);
+        assert!(!app.show_about);
     }
 }

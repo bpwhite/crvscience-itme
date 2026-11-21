@@ -54,8 +54,10 @@ USAGE:
 
 OPTIONS:
     --headless, --console         Run in terminal console mode (no display server required)
+    --grand-trajectory            Run continuous 4.25 Ga 8-epoch grand trajectory benchmark in headless mode
     --gui                         Force native desktop GUI mode
     --screenshot <FILE>           Render 1600x1000 offscreen GPU screenshot to PNG and exit
+    --screenshot-view <1|2|3>     Select screenshot view preset (1=Overview, 2=Grand Trajectory, 3=Biosphere) [default: 1]
     --organism <SLUG>             Select `rna`, `hominid`, `ai`, or `all` [default: all]
     --regime <CODE>               Select `all` (13 regimes) or a specific code (`0.0`, `0.5`, `1.0`,
                                   `1.5-AA`, `1.5-RP`, `2.0-EC`, `2.0-BAL`, `2.0-QS`, `3.0-DAR`,
@@ -63,10 +65,11 @@ OPTIONS:
     --steps <N>                   Simulation ticks per regime in headless mode [default: 24]
     --seed <U64>                  Deterministic Xoshiro256** PRNG seed [default: 20250813]
     --no-ascii-3d                 Omit inline 3D ASCII & spatial map projections in console output
-    --export-csv <FILE>           Export step-by-step ITME v12.0 telemetry table to CSV
+    --export-csv <FILE>           Export step-by-step ITME v2.3.0 telemetry table to CSV
     --export-svg <FILE>           Export 3D/2D projected structural stage atlas to SVG
     --export-newick <FILE>        Export Extended Newick (eNewick #H + MRO/APICO/KLEPTO NHX) networks
     --export-phylo-svg <FILE>     Export anastomosing SVG phylogram (Mito->Hydro, Hydro->MitoS & MRO->0)
+    -V, --version                 Print version information and exit
     -h, --help                    Print this help message"
     );
 }
@@ -86,6 +89,10 @@ fn main() {
         match args[i].as_str() {
             "-h" | "--help" => {
                 print_help();
+                return;
+            }
+            "-V" | "--version" => {
+                println!("itme_evolution_sim {}", env!("CARGO_PKG_VERSION"));
                 return;
             }
             "--headless" | "--console" => {
@@ -137,10 +144,13 @@ fn main() {
                     eprintln!("Error: --steps requires an integer.");
                     process::exit(2);
                 };
-                opts.steps_per_regime = val.parse::<usize>().unwrap_or_else(|_| {
-                    eprintln!("Error: invalid --steps integer '{val}'.");
-                    process::exit(2);
-                });
+                opts.steps_per_regime = val
+                    .parse::<usize>()
+                    .unwrap_or_else(|_| {
+                        eprintln!("Error: invalid --steps integer '{val}'.");
+                        process::exit(2);
+                    })
+                    .max(1);
             }
             "--seed" => {
                 i += 1;
