@@ -507,9 +507,11 @@ impl PlanetaryState {
 
 /// Prognostic **Planetary Atmosphere, Nutrient & Free-Energy Reservoir** co-regulated by biological
 /// and machine-verified guilds (Kleidon, 2012; Krissansen-Totton et al., 2018; Wong & Bartlett, 2022).
+/// Note: `atmospheric_o2` tracks a normalized `O2 (PAL Index)` (Present Atmospheric Level index in `[0.02, 0.94]`).
 #[derive(Clone, Debug)]
 pub struct PlanetaryBiosphere {
     pub state: PlanetaryState,
+    /// Normalized `O2 (PAL Index)` (Present Atmospheric Level index; `[0.02, 0.94]` dynamic range).
     pub atmospheric_o2: f64,
     pub atmospheric_co2_ppm: f64,
     pub nutrient_pool_np: f64,
@@ -1948,6 +1950,9 @@ pub fn compute_adami_conservation(sequences: &[&[u16]], alphabet_size: usize) ->
         return 1.0;
     }
     let h_max = (alphabet_size as f64).log2();
+    if !h_max.is_finite() || h_max <= 1e-9 {
+        return 1.0;
+    }
     let mut entropy_sum = 0.0;
     let mut evaluated_loci = 0usize;
     let mut counts = vec![0usize; alphabet_size];
@@ -1971,12 +1976,8 @@ pub fn compute_adami_conservation(sequences: &[&[u16]], alphabet_size: usize) ->
                     h_pos -= p * p.log2();
                 }
             }
-            let max_possible = h_max.min(n_f.log2());
-            let norm_h = if max_possible > 1e-9 {
-                (h_pos / max_possible).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
+            // Adami et al. (2000) physical complexity normalizes site entropy by log2(A).
+            let norm_h = (h_pos / h_max).clamp(0.0, 1.0);
             entropy_sum += norm_h;
         }
     }
@@ -2008,7 +2009,7 @@ pub fn compute_effective_structure_bits(
 pub fn compute_critical_fidelity(structure_raw_s: f64, selective_superiority: f64) -> f64 {
     let ln_sigma = selective_superiority.max(1.25).ln();
     let effective_digits = (structure_raw_s * 0.22).max(4.5);
-    (1.0 - ln_sigma / effective_digits).clamp(0.72, 0.95)
+    (1.0 - ln_sigma / effective_digits).clamp(0.72, 0.999)
 }
 
 pub fn compute_heritable_mutual_info(f_obs: f64, alphabet_size: usize, s_raw: f64) -> f64 {

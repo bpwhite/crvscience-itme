@@ -34,8 +34,12 @@ pub mod spatial;
 
 #[cfg(test)]
 mod tests {
-    use crate::model::{compute_adami_conservation, lz76_complexity, PriceDecomposition};
+    use crate::model::{
+        compute_adami_conservation, compute_critical_fidelity, lz76_complexity,
+        EnvironmentControls, PlanetaryBiosphere, PriceDecomposition,
+    };
     use crate::regimes::{classify_emergent_state, RegimeId};
+    use crate::spatial::SpatialGrid;
 
     #[test]
     fn unit_test_adami_conservation_clonal_vs_polymorphic() {
@@ -46,6 +50,111 @@ mod tests {
         let poly = compute_adami_conservation(&[&a, &c], 12);
         assert!((clonal - 1.0).abs() < 1e-12);
         assert!(poly < 1.0);
+    }
+
+    #[test]
+    fn unit_test_adami_conservation_log2_alphabet_normalization_and_edge_cases() {
+        let rho = compute_adami_conservation(&[&[0, 1], &[0, 2]], 20);
+        assert!(
+            rho > 0.75 && rho < 1.0,
+            "Adami log2(20) site normalization must yield > 0.75, got {rho}"
+        );
+        let expected = 1.0 - (0.5 / 20.0_f64.log2());
+        assert!((rho - expected).abs() < 1e-12);
+
+        // Edge cases must remain completely safe and finite
+        assert!((compute_adami_conservation(&[], 20) - 1.0).abs() < 1e-12);
+        assert!((compute_adami_conservation(&[&[0, 1]], 20) - 1.0).abs() < 1e-12);
+        assert!((compute_adami_conservation(&[&[], &[]], 20) - 1.0).abs() < 1e-12);
+        assert!((compute_adami_conservation(&[&[0], &[]], 20) - 1.0).abs() < 1e-12);
+        assert!((compute_adami_conservation(&[&[0, 1], &[0, 2]], 1) - 1.0).abs() < 1e-12);
+        assert!((compute_adami_conservation(&[&[0, 1], &[0, 2]], 0) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn unit_test_critical_fidelity_upper_clamp_0999_and_o2_pal_index_bounds() {
+        let f_high = compute_critical_fidelity(2500.0, 2.0);
+        assert!(
+            f_high > 0.95 && f_high <= 0.999,
+            "Expected Eq. 11 threshold in (0.95, 0.999], got {f_high}"
+        );
+        let f_sat = compute_critical_fidelity(1.0e7, 2.0);
+        assert!((f_sat - 0.999).abs() < 1e-12, "Expected upper clamp 0.999, got {f_sat}");
+        let f_low = compute_critical_fidelity(2.0, 20.0);
+        assert!((f_low - 0.72).abs() < 1e-12, "Expected lower clamp 0.72, got {f_low}");
+        assert!(compute_critical_fidelity(f64::NAN, f64::NAN).is_finite());
+
+        let mut ctrl = EnvironmentControls::default();
+        ctrl.biogeochemical_feedback_gain = 1.0;
+        ctrl.planetary_stewardship_coupling = 1.0;
+        let mut bio = PlanetaryBiosphere::new_for_controls(&ctrl);
+        for _ in 0..80 {
+            bio.step_biogeochemical_feedbacks(3.0, 2.5, 2.5, 0.0, 2.5, &ctrl);
+            assert!(
+                (0.02..=0.94).contains(&bio.atmospheric_o2),
+                "O2 (PAL Index) escaped [0.02, 0.94]: {}",
+                bio.atmospheric_o2
+            );
+        }
+        ctrl.extractive_burn_intensity = 1.0;
+        ctrl.planetary_stewardship_coupling = 0.0;
+        for _ in 0..80 {
+            bio.step_biogeochemical_feedbacks(0.0, 0.0, 0.0, 3.0, 0.0, &ctrl);
+            assert!(
+                (0.02..=0.94).contains(&bio.atmospheric_o2),
+                "O2 (PAL Index) escaped [0.02, 0.94]: {}",
+                bio.atmospheric_o2
+            );
+        }
+    }
+
+    #[test]
+    fn unit_test_spatial_toroidal_mass_conservation_and_nonfinite_flux_guard() {
+        let mut grid = SpatialGrid::new(10, 8, 1.0);
+        assert_eq!(grid.idx(10, 8), grid.idx(0, 0));
+        assert_eq!(grid.idx(19, 15), grid.idx(9, 7));
+
+        grid.byproduct.fill(0.0);
+        grid.niche.fill(0.0);
+        let corner = grid.idx(0, 0);
+        grid.byproduct[corner] = 1.6;
+        grid.niche[corner] = 1.8;
+
+        grid.step_reaction_diffusion(1.0, 0.12, 0.02, 0.10);
+
+        // Verify seamless periodic wrap-around across (0, 0) <-> (width - 1, 0) and (0, height - 1)
+        assert!(grid.local_byproduct(9, 0) > 0.0);
+        assert!(grid.local_byproduct(0, 7) > 0.0);
+        assert!((grid.local_byproduct(9, 0) - grid.local_byproduct(1, 0)).abs() < 1e-12);
+        assert!((grid.local_byproduct(0, 7) - grid.local_byproduct(0, 1)).abs() < 1e-12);
+        assert!((grid.local_niche(9, 0) - grid.local_niche(1, 0)).abs() < 1e-12);
+        assert!((grid.local_niche(0, 7) - grid.local_niche(0, 1)).abs() < 1e-12);
+
+        // Verify exact mass conservation under toroidal diffusion + linear decay
+        let total_b: f64 = grid.byproduct.iter().sum();
+        let total_n: f64 = grid.niche.iter().sum();
+        assert!(
+            (total_b - 1.6 * (1.0 - 0.085)).abs() < 1e-12,
+            "Toroidal byproduct mass mismatch: {total_b}"
+        );
+        assert!(
+            (total_n - 1.8 * (1.0 - 0.02)).abs() < 1e-12,
+            "Toroidal niche mass mismatch: {total_n}"
+        );
+
+        // Verify NaN / Inf / -Inf bath_exergy_flux cannot corrupt fields
+        let prev_exergy = grid.exergy.clone();
+        let prev_byproduct = grid.byproduct.clone();
+        let prev_niche = grid.niche.clone();
+        for bad_flux in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            grid.step_reaction_diffusion(bad_flux, 0.12, 0.02, 0.10);
+            assert!(grid.exergy.iter().all(|v| v.is_finite()));
+            assert!(grid.byproduct.iter().all(|v| v.is_finite()));
+            assert!(grid.niche.iter().all(|v| v.is_finite()));
+            assert_eq!(grid.exergy, prev_exergy);
+            assert_eq!(grid.byproduct, prev_byproduct);
+            assert_eq!(grid.niche, prev_niche);
+        }
     }
 
     #[test]

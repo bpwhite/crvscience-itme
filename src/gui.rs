@@ -117,6 +117,7 @@ struct DomainSession {
     camera: Camera3D,
     auto_rotate: bool,
     show_labels: bool,
+    show_milestones: bool,
     paused: bool,
     steps_per_second: f32,
     last_step_instant: Instant,
@@ -157,10 +158,17 @@ impl ItmeGuiApp {
     }
 
     fn draw_panels(&mut self, ctx: &egui::Context) {
-        if self.show_about && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        if self.show_about && esc_pressed {
             self.show_about = false;
-        } else if !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::F1)) {
-            self.show_about = !self.show_about;
+        } else if !ctx.wants_keyboard_input() {
+            if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+                self.show_about = !self.show_about;
+            } else if !self.show_about {
+                if let AppScreen::Simulation(session) = &mut self.screen {
+                    session.handle_global_hotkeys(ctx, esc_pressed);
+                }
+            }
         }
 
         let mut next_screen: Option<AppScreen> = None;
@@ -656,6 +664,7 @@ impl DomainSession {
             camera: Camera3D::default(),
             auto_rotate: true,
             show_labels: true,
+            show_milestones: true,
             paused: false,
             steps_per_second: 8.0,
             last_step_instant: Instant::now(),
@@ -698,6 +707,7 @@ impl DomainSession {
             camera: Camera3D::default(),
             auto_rotate: true,
             show_labels: true,
+            show_milestones: true,
             paused: false,
             steps_per_second: 8.0,
             last_step_instant: Instant::now(),
@@ -767,6 +777,63 @@ impl DomainSession {
         }
     }
 
+    fn handle_global_hotkeys(&mut self, ctx: &egui::Context, esc_pressed: bool) {
+        if esc_pressed {
+            self.wants_main_menu = true;
+            return;
+        }
+        ctx.input(|i| {
+            if i.key_pressed(egui::Key::Space) {
+                self.paused = !self.paused;
+                self.last_step_instant = Instant::now();
+            }
+            if i.key_pressed(egui::Key::Period) {
+                self.step_once();
+            }
+            if i.key_pressed(egui::Key::R) {
+                self.camera = Camera3D::default();
+            }
+            if i.key_pressed(egui::Key::Num1) {
+                self.viewport_layout = ViewportLayout::SpatialAndPhylogeny;
+            } else if i.key_pressed(egui::Key::Num2) {
+                self.viewport_layout = ViewportLayout::SpatialGridAnd3D;
+            } else if i.key_pressed(egui::Key::Num3) {
+                self.viewport_layout = ViewportLayout::PhylogenyFull;
+            } else if i.key_pressed(egui::Key::Num4) {
+                self.viewport_layout = ViewportLayout::Perspective3D;
+            } else if i.key_pressed(egui::Key::Num5) {
+                self.viewport_layout = ViewportLayout::Blueprint2D;
+            } else if i.key_pressed(egui::Key::Num6) && self.coupled_biosphere {
+                self.viewport_layout = ViewportLayout::GrandTrajectory;
+            }
+        });
+    }
+
+    fn step_to_ga(&self, step: usize) -> f64 {
+        if !self.grand_epochs.is_empty() {
+            let first = &self.grand_epochs[0];
+            if step <= first.tick_end {
+                return first.geologic_age_ga;
+            }
+            for win in self.grand_epochs.windows(2) {
+                let a = &win[0];
+                let b = &win[1];
+                if step <= b.tick_end {
+                    let span = (b.tick_end.saturating_sub(a.tick_end)).max(1) as f64;
+                    let frac = ((step.saturating_sub(a.tick_end)) as f64 / span).clamp(0.0, 1.0);
+                    return a.geologic_age_ga + (b.geologic_age_ga - a.geologic_age_ga) * frac;
+                }
+            }
+            return self.grand_epochs.last().map_or(0.0, |e| e.geologic_age_ga);
+        }
+        let total_ticks = if self.world.mode == SimulationMode::GuidedCurriculum {
+            (self.world.steps_per_stage.max(12) * 13) as f64
+        } else {
+            240.0
+        };
+        (4.25 * (1.0 - (step as f64) / total_ticks)).clamp(0.0, 4.25)
+    }
+
     fn draw_panels(&mut self, ctx: &egui::Context) {
         self.draw_top_toolbar(ctx);
         self.draw_left_controls(ctx);
@@ -781,6 +848,7 @@ impl DomainSession {
             ui.horizontal_wrapped(|ui| {
                 if ui
                     .button(egui::RichText::new("<- Main Menu").strong())
+                    .on_hover_text("Return to the Domain Launcher Main Menu (Esc)")
                     .clicked()
                 {
                     self.wants_main_menu = true;
@@ -800,11 +868,19 @@ impl DomainSession {
                 ui.separator();
 
                 let play_label = if self.paused { "Play" } else { "Pause" };
-                if ui.button(play_label).clicked() {
+                if ui
+                    .button(play_label)
+                    .on_hover_text("Toggle simulation playback (Space)")
+                    .clicked()
+                {
                     self.paused = !self.paused;
                     self.last_step_instant = Instant::now();
                 }
-                if ui.button("Step").clicked() {
+                if ui
+                    .button("Step")
+                    .on_hover_text("Advance simulation by one discrete tick (.)")
+                    .clicked()
+                {
                     self.step_once();
                 }
                 let slug = if self.coupled_biosphere {
@@ -813,54 +889,64 @@ impl DomainSession {
                     self.organism.slug()
                 };
                 let step = self.world.step_count;
-                if ui
-                    .button("Export CSV")
-                    .on_hover_text("Export step-by-step telemetry (or 8-Epoch Grand Trajectory) to CSV.")
-                    .clicked()
-                {
-                    let csv_data = if self.coupled_biosphere
-                        && !self.grand_epochs.is_empty()
-                        && self.viewport_layout == ViewportLayout::GrandTrajectory
+                let export_resp = ui.menu_button("Export...", |ui| {
+                    if ui
+                        .button("Telemetry CSV (.csv)")
+                        .on_hover_text("Export step-by-step telemetry (or 8-Epoch Grand Trajectory) to CSV.")
+                        .clicked()
                     {
-                        SimulationWorld::export_grand_trajectory_csv(&self.grand_epochs)
-                    } else {
-                        self.world.export_history_csv()
-                    };
-                    let fname = format!("itme_{slug}_step{step}.csv");
-                    self.save_text_with_dialog(&fname, "CSV Telemetry", "csv", &csv_data);
-                }
-                if ui
-                    .button("Export Stage Atlas SVG")
-                    .on_hover_text("Export 13-regime 3D/2D structural stage atlas as vector SVG.")
-                    .clicked()
-                {
-                    let atlas_svg = self.world.build_stage_atlas_svg();
-                    let fname = format!("itme_{slug}_stage_atlas.svg");
-                    self.save_text_with_dialog(&fname, "SVG Vector Graphics", "svg", &atlas_svg);
-                }
-                if ui
-                    .button("Export NHX")
-                    .on_hover_text("Export Extended Newick (eNewick #H + MRO/APICO/KLEPTO NHX) lineage network.")
-                    .clicked()
-                {
-                    let nhx = self.world.export_newick(true);
-                    let fname = format!("itme_{slug}_step{step}.nhx");
-                    self.save_text_with_dialog(&fname, "Extended Newick", "nhx", &nhx);
-                }
-                if ui
-                    .button("Export Phylogram SVG")
-                    .on_hover_text("Export reticulate anastomosing evolutionary phylogram as vector SVG.")
-                    .clicked()
-                {
-                    let phylo_svg = self.world.export_phylogram_svg();
-                    let fname = format!("itme_{slug}_step{step}_phylogram.svg");
-                    self.save_text_with_dialog(&fname, "SVG Phylogram", "svg", &phylo_svg);
-                }
+                        let csv_data = if self.coupled_biosphere
+                            && !self.grand_epochs.is_empty()
+                            && self.viewport_layout == ViewportLayout::GrandTrajectory
+                        {
+                            SimulationWorld::export_grand_trajectory_csv(&self.grand_epochs)
+                        } else {
+                            self.world.export_history_csv()
+                        };
+                        let fname = format!("itme_{slug}_step{step}.csv");
+                        self.save_text_with_dialog(&fname, "CSV Telemetry", "csv", &csv_data);
+                        ui.close_menu();
+                    }
+                    if ui
+                        .button("Stage Atlas SVG (.svg)")
+                        .on_hover_text("Export 13-regime 3D/2D structural stage atlas as vector SVG.")
+                        .clicked()
+                    {
+                        let atlas_svg = self.world.build_stage_atlas_svg();
+                        let fname = format!("itme_{slug}_stage_atlas.svg");
+                        self.save_text_with_dialog(&fname, "SVG Vector Graphics", "svg", &atlas_svg);
+                        ui.close_menu();
+                    }
+                    if ui
+                        .button("Extended Newick (.nhx)")
+                        .on_hover_text("Export Extended Newick (eNewick #H + MRO/APICO/KLEPTO NHX) lineage network.")
+                        .clicked()
+                    {
+                        let nhx = self.world.export_newick(true);
+                        let fname = format!("itme_{slug}_step{step}.nhx");
+                        self.save_text_with_dialog(&fname, "Extended Newick", "nhx", &nhx);
+                        ui.close_menu();
+                    }
+                    if ui
+                        .button("Phylogram SVG (.svg)")
+                        .on_hover_text("Export reticulate anastomosing evolutionary phylogram as vector SVG.")
+                        .clicked()
+                    {
+                        let phylo_svg = self.world.export_phylogram_svg();
+                        let fname = format!("itme_{slug}_step{step}_phylogram.svg");
+                        self.save_text_with_dialog(&fname, "SVG Phylogram", "svg", &phylo_svg);
+                        ui.close_menu();
+                    }
+                });
+                export_resp
+                    .response
+                    .on_hover_text("Export telemetry CSV, 13-regime Stage Atlas SVG, Extended Newick (NHX), or Phylogram SVG.");
                 ui.add(
                     egui::Slider::new(&mut self.steps_per_second, 1.0..=30.0)
                         .text("ticks/s")
                         .logarithmic(false),
-                );
+                )
+                .on_hover_text("Simulation playback speed in discrete ticks per second.");
 
                 ui.separator();
                 ui.label("View:");
@@ -868,38 +954,53 @@ impl DomainSession {
                     &mut self.viewport_layout,
                     ViewportLayout::SpatialAndPhylogeny,
                     "Spatial + Network",
-                );
+                )
+                .on_hover_text("Split view: 2D spatial reaction-diffusion grid + reticulate phylogram (1)");
                 ui.selectable_value(
                     &mut self.viewport_layout,
                     ViewportLayout::SpatialGridAnd3D,
                     "Spatial + 3D",
-                );
+                )
+                .on_hover_text("Split view: 2D spatial grid + interactive 3D structure (2)");
                 ui.selectable_value(
                     &mut self.viewport_layout,
                     ViewportLayout::PhylogenyFull,
                     "Full Lineage",
-                );
+                )
+                .on_hover_text("Full-width anastomosing evolutionary lineage tree (3)");
                 ui.selectable_value(
                     &mut self.viewport_layout,
                     ViewportLayout::Perspective3D,
                     "3D Structure",
-                );
+                )
+                .on_hover_text("Interactive 3D structure — drag to orbit, scroll to zoom, R to reset camera (4)");
                 ui.selectable_value(
                     &mut self.viewport_layout,
                     ViewportLayout::Blueprint2D,
                     "2D Blueprint",
-                );
+                )
+                .on_hover_text("2D schematic structural blueprint with directed edges (5)");
                 if self.coupled_biosphere {
                     ui.selectable_value(
                         &mut self.viewport_layout,
                         ViewportLayout::GrandTrajectory,
                         "4.25 Ga Timeline",
-                    );
+                    )
+                    .on_hover_text("Continuous 8-Epoch 4.25 Ga -> Gaia-2.0 Grand Trajectory plots & ledger (6)");
                 }
 
                 ui.separator();
-                ui.checkbox(&mut self.auto_rotate, "Auto-Orbit");
-                ui.checkbox(&mut self.show_labels, "Labels");
+                ui.checkbox(&mut self.auto_rotate, "Auto-Orbit")
+                    .on_hover_text("Automatically orbit the 3D structural camera.");
+                ui.checkbox(&mut self.show_labels, "Labels")
+                    .on_hover_text("Show/hide pill labels across spatial, lineage, 3D, and 2D viewports.");
+                let ms_lbl = if self.show_milestones {
+                    "Milestones [-]"
+                } else {
+                    "Milestones [+]"
+                };
+                ui.toggle_value(&mut self.show_milestones, ms_lbl)
+                    .on_hover_text("Show or collapse quick milestone trigger buttons to maximize viewport canvas height.");
 
                 ui.separator();
                 ui.label(
@@ -916,204 +1017,266 @@ impl DomainSession {
                 }
             });
 
-            ui.add_space(2.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    egui::RichText::new(if self.coupled_biosphere {
-                        "Biosphere Milestones:"
-                    } else {
-                        "Domain Milestones:"
-                    })
-                    .small()
-                    .strong()
-                    .color(egui::Color32::from_rgb(148, 163, 184)),
-                );
-                if self.coupled_biosphere {
-                    if ui.button("4.25 Ga Grand Trajectory").clicked() {
-                        let epochs = self.world.run_continuous_grand_trajectory(10);
-                        self.grand_epochs = epochs.clone();
-                        self.viewport_layout = ViewportLayout::GrandTrajectory;
-                        if let Some(last_ep) = epochs.last() {
+            if self.show_milestones {
+                ui.add_space(2.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        egui::RichText::new(if self.coupled_biosphere {
+                            "Biosphere Milestones:"
+                        } else {
+                            "Domain Milestones:"
+                        })
+                        .small()
+                        .strong()
+                        .color(egui::Color32::from_rgb(148, 163, 184)),
+                    );
+                    if self.coupled_biosphere {
+                        if ui
+                            .button("4.25 Ga Grand Trajectory")
+                            .on_hover_text("Run unbroken 8-Epoch continuous simulation from 4.25 Ga to Gaia-2.0.")
+                            .clicked()
+                        {
+                            let epochs = self.world.run_continuous_grand_trajectory(10);
+                            self.grand_epochs = epochs.clone();
+                            self.viewport_layout = ViewportLayout::GrandTrajectory;
+                            if let Some(last_ep) = epochs.last() {
+                                self.export_status = Some((
+                                    format!(
+                                        "8-Epoch Trajectory -> {}: L_I={:.2}, MI={:.1}b, O2 (PAL)={:.2}",
+                                        last_ep.epoch.code(),
+                                        last_ep.informational_leverage_li,
+                                        last_ep.heritable_mutual_info_bits,
+                                        last_ep.planetary_o2
+                                    ),
+                                    false,
+                                ));
+                            }
+                        }
+                        if ui
+                            .button("Gaia-2.0 Awakening")
+                            .on_hover_text("Activate verified planetary stewardship co-regulating O2 (PAL Index), CO2, and exergy.")
+                            .clicked()
+                        {
+                            self.world.controls.biogeochemical_feedback_gain =
+                                self.world.controls.biogeochemical_feedback_gain.max(0.85);
+                            self.world.controls.planetary_stewardship_coupling =
+                                self.world.controls.planetary_stewardship_coupling.max(0.92);
+                            self.world.controls.extractive_burn_intensity =
+                                self.world.controls.extractive_burn_intensity.min(0.18);
+                            let (_, aw_n, ex_b) = self.world.trigger_planetary_awakening_pulse();
                             self.export_status = Some((
                                 format!(
-                                    "8-Epoch Trajectory -> {}: L_I={:.2}, MI={:.1}b, O2={:.2}",
-                                    last_ep.epoch.code(),
-                                    last_ep.informational_leverage_li,
-                                    last_ep.heritable_mutual_info_bits,
-                                    last_ep.planetary_o2
+                                    "Gaia-2.0 Awakening: {aw_n} co-regulated units | O2 (PAL)={:.2}, CO2={:.0}ppm, Exergy={ex_b:.2}",
+                                    self.world.biosphere.atmospheric_o2,
+                                    self.world.biosphere.atmospheric_co2_ppm
                                 ),
                                 false,
                             ));
                         }
-                    }
-                    if ui.button("Gaia-2.0 Awakening").clicked() {
-                        self.world.controls.biogeochemical_feedback_gain =
-                            self.world.controls.biogeochemical_feedback_gain.max(0.85);
-                        self.world.controls.planetary_stewardship_coupling =
-                            self.world.controls.planetary_stewardship_coupling.max(0.92);
-                        self.world.controls.extractive_burn_intensity =
-                            self.world.controls.extractive_burn_intensity.min(0.18);
-                        let (_, aw_n, ex_b) = self.world.trigger_planetary_awakening_pulse();
-                        self.export_status = Some((
-                            format!(
-                                "Gaia-2.0 Awakening: {aw_n} co-regulated units | O2={:.2}, CO2={:.0}ppm, Exergy={ex_b:.2}",
-                                self.world.biosphere.atmospheric_o2,
-                                self.world.biosphere.atmospheric_co2_ppm
-                            ),
-                            false,
-                        ));
-                    }
-                    if ui.button("Extractive CO2 Overshoot").clicked() {
-                        self.world.controls.biogeochemical_feedback_gain = 0.85;
-                        self.world.controls.planetary_stewardship_coupling = 0.08;
-                        self.world.controls.extractive_burn_intensity = 0.92;
-                        for _ in 0..8 {
-                            self.step_once();
+                        if ui
+                            .button("Extractive CO2 Overshoot")
+                            .on_hover_text("Simulate unguided high-burn extractive stress pushing CO2 and boundary transgression load.")
+                            .clicked()
+                        {
+                            self.world.controls.biogeochemical_feedback_gain = 0.85;
+                            self.world.controls.planetary_stewardship_coupling = 0.08;
+                            self.world.controls.extractive_burn_intensity = 0.92;
+                            for _ in 0..8 {
+                                self.step_once();
+                            }
+                            self.export_status = Some((
+                                format!(
+                                    "Boundary Stress: State={}, CO2={:.0}ppm, Load={:.2}",
+                                    self.world.biosphere.state.short_code(),
+                                    self.world.biosphere.atmospheric_co2_ppm,
+                                    self.world.biosphere.boundary_transgression_load
+                                ),
+                                false,
+                            ));
                         }
-                        self.export_status = Some((
-                            format!(
-                                "Boundary Stress: State={}, CO2={:.0}ppm, Load={:.2}",
-                                self.world.biosphere.state.short_code(),
-                                self.world.biosphere.atmospheric_co2_ppm,
-                                self.world.biosphere.boundary_transgression_load
-                            ),
-                            false,
-                        ));
-                    }
-                } else {
-                    match self.organism {
-                        OrganismKind::RnaDnaProtein => {
-                            if ui.button("Hadean Abiogenesis -> LUCA").clicked() {
-                                let (rf, lc, eig) = self.world.trigger_hadean_abiogenesis_pulse();
-                                self.export_status = Some((
-                                    format!(
-                                        "Hadean Abiogenesis: +{rf} RAF Protocells, +{lc} LUCA (Eigen L_max={eig} nt)"
-                                    ),
-                                    false,
-                                ));
-                            }
-                            if ui.button("Homochiral D/L + SGC").clicked() {
-                                let (hm, sgc, mp) = self.world.trigger_homochiral_sgc_pulse();
-                                self.export_status = Some((
-                                    format!(
-                                        "Homochirality & SGC: +{hm} D-RNA breaks, +{sgc} 20-AA SGC (MP={:.1}%)",
-                                        mp * 100.0
-                                    ),
-                                    false,
-                                ));
-                            }
-                            if ui.button("RNR RNA->T-DNA").clicked() {
-                                let (rn, td, kb) = self.world.trigger_rna_to_dna_virosphere_pulse();
-                                self.export_status = Some((
-                                    format!(
-                                        "RNR & UDG Repair: +{rn} U-DNA, +{td} T-DNA Genomes (Cap={kb:.0} kb)"
-                                    ),
-                                    false,
-                                ));
-                            }
-                            if ui.button("1°/2° Symbio + MRO").clicked() {
-                                let fused = self.world.trigger_endosymbiotic_pulse();
-                                let ser = self.world.trigger_serial_endosymbiosis_pulse();
-                                let (hy, mi, am) = self.world.trigger_mro_reduction_pulse();
-                                self.export_status = Some((
-                                    format!(
-                                        "Symbiosis & MRO: 1°={fused}, Serial={ser:?}, +Hy:{hy} +MitoS:{mi} +SUF(MRO->0):{am}"
-                                    ),
-                                    false,
-                                ));
-                            }
-                        }
-                        OrganismKind::HominidPopulation => {
-                            if ui.button("Kin Division & Lithic Guilds").clicked() {
-                                self.jump_to_regime(RegimeId::R30FullyDarwinian);
-                                self.export_status = Some((
-                                    "Promoted foraging bands to kin-structured lithic guilds R(3.0-DAR)."
-                                        .to_string(),
-                                    false,
-                                ));
-                            }
-                            if ui.button("Symbolic Teaching + Ratchet").clicked() {
-                                self.world.controls.symbolic_teaching_fidelity =
-                                    self.world.controls.symbolic_teaching_fidelity.max(0.90);
-                                self.world.controls.inter_deme_connectivity =
-                                    self.world.controls.inter_deme_connectivity.clamp(0.25, 0.55);
-                                let (rt, sym, rec) = self.world.trigger_cultural_ratchet_pulse();
-                                self.export_status = Some((
-                                    format!(
-                                        "Symbolic Culture: +{rt} ratchets, +{sym} pedagogical lineages, +{rec} deme recombinations"
-                                    ),
-                                    false,
-                                ));
-                            }
-                            if ui.button("Agro-Ectosymbiosis & Crops").clicked() {
-                                let (ag, ob, sh) =
-                                    self.world.trigger_agriculture_domestication_pulse();
-                                self.export_status = Some((
-                                    format!(
-                                        "Cultivar Care: +{ag} farming demes, +{ob} clonal crops, {sh} defensive shields"
-                                    ),
-                                    false,
-                                ));
-                            }
-                            if ui.button("Written Archive + Peer Audit").clicked() {
-                                let (ar, inst, aud) = self.world.trigger_exosomatic_archive_pulse();
-                                self.export_status = Some((
-                                    format!(
-                                        "Written Archives: +{ar} archives, +{inst} peer institutions, {aud} audits"
-                                    ),
-                                    false,
-                                ));
-                            }
-                        }
-                        OrganismKind::ArtificialIntelligence => {
-                            if ui.button("Container Checkpoint Scale").clicked() {
-                                self.jump_to_regime(RegimeId::R15Replicative);
-                                self.export_status = Some((
-                                    "Scaled stateless container weights across cluster R(1.5-RP)."
-                                        .to_string(),
-                                    false,
-                                ));
-                            }
-                            if ui.button("Adversarial Arena (PBT)").clicked() {
-                                self.jump_to_regime(RegimeId::R30FullyDarwinian);
-                                self.export_status = Some((
-                                    "Activated population-based training & adversarial arena R(3.0-DAR)."
-                                        .to_string(),
-                                    false,
-                                ));
-                            }
-                            if ui.button("Formal Proof Verifier").clicked() {
-                                let (ms, fm, prf) = self.world.trigger_machine_synthesis_pulse();
-                                self.export_status = Some((
-                                    format!(
-                                        "Formal Verifiers: +{ms} compute symbionts, +{fm} verified loops, {prf} proofs checked"
-                                    ),
-                                    false,
-                                ));
-                            }
-                            if ui.button("Anti-Collapse Safeguard").clicked() {
-                                self.world.controls.empirical_grounding_floor =
-                                    self.world.controls.empirical_grounding_floor.max(0.36);
-                                self.world.controls.formal_verifier_strictness =
-                                    self.world.controls.formal_verifier_strictness.max(0.92);
-                                self.world.controls.unverified_publish_pressure =
-                                    self.world.controls.unverified_publish_pressure.min(0.18);
-                                for _ in 0..4 {
-                                    self.step_once();
+                    } else {
+                        match self.organism {
+                            OrganismKind::RnaDnaProtein => {
+                                if ui
+                                    .button("Hadean Abiogenesis -> LUCA")
+                                    .on_hover_text("Seed citrate-chelated RAF protocells and step toward Darwinian LUCA.")
+                                    .clicked()
+                                {
+                                    let (rf, lc, eig) = self.world.trigger_hadean_abiogenesis_pulse();
+                                    self.export_status = Some((
+                                        format!(
+                                            "Hadean Abiogenesis: +{rf} RAF Protocells, +{lc} LUCA (Eigen L_max={eig} nt)"
+                                        ),
+                                        false,
+                                    ));
                                 }
-                                let m = self.world.latest_metrics();
-                                self.export_status = Some((
-                                    format!(
-                                        "Anti-Collapse Guard active: empiric floor >= 0.36 | TailDiv = {:.2}, Theorems = {:.1}b",
-                                        m.mean_tail_diversity, m.mean_verified_theorem_bits
-                                    ),
-                                    false,
-                                ));
+                                if ui
+                                    .button("Homochiral D/L + SGC")
+                                    .on_hover_text("Trigger Fe3O4 CISS D-RNA symmetry breaking, L-aminoacylation, and 20-AA SGC crystallization.")
+                                    .clicked()
+                                {
+                                    let (hm, sgc, mp) = self.world.trigger_homochiral_sgc_pulse();
+                                    self.export_status = Some((
+                                        format!(
+                                            "Homochirality & SGC: +{hm} D-RNA breaks, +{sgc} 20-AA SGC (MP={:.1}%)",
+                                            mp * 100.0
+                                        ),
+                                        false,
+                                    ));
+                                }
+                                if ui
+                                    .button("RNR RNA->T-DNA")
+                                    .on_hover_text("Activate Class III RNR deoxyribose reduction and ThyX/UDG cytosine-deamination repair.")
+                                    .clicked()
+                                {
+                                    let (rn, td, kb) = self.world.trigger_rna_to_dna_virosphere_pulse();
+                                    self.export_status = Some((
+                                        format!(
+                                            "RNR & UDG Repair: +{rn} U-DNA, +{td} T-DNA Genomes (Cap={kb:.0} kb)"
+                                        ),
+                                        false,
+                                    ));
+                                }
+                                if ui
+                                    .button("1°/2° Symbio + MRO")
+                                    .on_hover_text("Trigger 1°/2° endosymbiotic fusion and anaerobic MRO streamlining (Mito->Hydro->MitoS->MRO->0).")
+                                    .clicked()
+                                {
+                                    let fused = self.world.trigger_endosymbiotic_pulse();
+                                    let ser = self.world.trigger_serial_endosymbiosis_pulse();
+                                    let (hy, mi, am) = self.world.trigger_mro_reduction_pulse();
+                                    self.export_status = Some((
+                                        format!(
+                                            "Symbiosis & MRO: 1°={fused}, Serial={ser:?}, +Hy:{hy} +MitoS:{mi} +SUF(MRO->0):{am}"
+                                        ),
+                                        false,
+                                    ));
+                                }
+                            }
+                            OrganismKind::HominidPopulation => {
+                                if ui
+                                    .button("Kin Division & Lithic Guilds")
+                                    .on_hover_text("Promote foraging bands into kin-structured lithic guilds in R(3.0-DAR).")
+                                    .clicked()
+                                {
+                                    self.jump_to_regime(RegimeId::R30FullyDarwinian);
+                                    self.export_status = Some((
+                                        "Promoted foraging bands to kin-structured lithic guilds R(3.0-DAR)."
+                                            .to_string(),
+                                        false,
+                                    ));
+                                }
+                                if ui
+                                    .button("Symbolic Teaching + Ratchet")
+                                    .on_hover_text("Elevate symbolic pedagogical fidelity and partial deme connectivity to drive cultural ratchets.")
+                                    .clicked()
+                                {
+                                    self.world.controls.symbolic_teaching_fidelity =
+                                        self.world.controls.symbolic_teaching_fidelity.max(0.90);
+                                    self.world.controls.inter_deme_connectivity =
+                                        self.world.controls.inter_deme_connectivity.clamp(0.25, 0.55);
+                                    let (rt, sym, rec) = self.world.trigger_cultural_ratchet_pulse();
+                                    self.export_status = Some((
+                                        format!(
+                                            "Symbolic Culture: +{rt} ratchets, +{sym} pedagogical lineages, +{rec} deme recombinations"
+                                        ),
+                                        false,
+                                    ));
+                                }
+                                if ui
+                                    .button("Agro-Ectosymbiosis & Crops")
+                                    .on_hover_text("Trigger clonal cultivar domestication and defensive antimicrobial shields.")
+                                    .clicked()
+                                {
+                                    let (ag, ob, sh) =
+                                        self.world.trigger_agriculture_domestication_pulse();
+                                    self.export_status = Some((
+                                        format!(
+                                            "Cultivar Care: +{ag} farming demes, +{ob} clonal crops, {sh} defensive shields"
+                                        ),
+                                        false,
+                                    ));
+                                }
+                                if ui
+                                    .button("Written Archive + Peer Audit")
+                                    .on_hover_text("Externalize cultural knowledge into written archives with institutional replication audits.")
+                                    .clicked()
+                                {
+                                    let (ar, inst, aud) = self.world.trigger_exosomatic_archive_pulse();
+                                    self.export_status = Some((
+                                        format!(
+                                            "Written Archives: +{ar} archives, +{inst} peer institutions, {aud} audits"
+                                        ),
+                                        false,
+                                    ));
+                                }
+                            }
+                            OrganismKind::ArtificialIntelligence => {
+                                if ui
+                                    .button("Container Checkpoint Scale")
+                                    .on_hover_text("Jump to R(1.5-RP) stateless container and checkpoint cloning.")
+                                    .clicked()
+                                {
+                                    self.jump_to_regime(RegimeId::R15Replicative);
+                                    self.export_status = Some((
+                                        "Scaled stateless container weights across cluster R(1.5-RP)."
+                                            .to_string(),
+                                        false,
+                                    ));
+                                }
+                                if ui
+                                    .button("Adversarial Arena (PBT)")
+                                    .on_hover_text("Activate population-based training and adversarial policy arenas in R(3.0-DAR).")
+                                    .clicked()
+                                {
+                                    self.jump_to_regime(RegimeId::R30FullyDarwinian);
+                                    self.export_status = Some((
+                                        "Activated population-based training & adversarial arena R(3.0-DAR)."
+                                            .to_string(),
+                                        false,
+                                    ));
+                                }
+                                if ui
+                                    .button("Formal Proof Verifier")
+                                    .on_hover_text("Couple generative rollouts to deterministic formal proof-checker kernels.")
+                                    .clicked()
+                                {
+                                    let (ms, fm, prf) = self.world.trigger_machine_synthesis_pulse();
+                                    self.export_status = Some((
+                                        format!(
+                                            "Formal Verifiers: +{ms} compute symbionts, +{fm} verified loops, {prf} proofs checked"
+                                        ),
+                                        false,
+                                    ));
+                                }
+                                if ui
+                                    .button("Anti-Collapse Safeguard")
+                                    .on_hover_text("Enforce empirical grounding floor (>= 0.36) and strict formal verification (>= 0.92) to halt model collapse.")
+                                    .clicked()
+                                {
+                                    self.world.controls.empirical_grounding_floor =
+                                        self.world.controls.empirical_grounding_floor.max(0.36);
+                                    self.world.controls.formal_verifier_strictness =
+                                        self.world.controls.formal_verifier_strictness.max(0.92);
+                                    self.world.controls.unverified_publish_pressure =
+                                        self.world.controls.unverified_publish_pressure.min(0.18);
+                                    for _ in 0..4 {
+                                        self.step_once();
+                                    }
+                                    let m = self.world.latest_metrics();
+                                    self.export_status = Some((
+                                        format!(
+                                            "Anti-Collapse Guard active: empiric floor >= 0.36 | TailDiv = {:.2}, Theorems = {:.1}b",
+                                            m.mean_tail_diversity, m.mean_verified_theorem_bits
+                                        ),
+                                        false,
+                                    ));
+                                }
                             }
                         }
                     }
-                }
-            });
+                });
+            }
             ui.add_space(4.0);
         });
     }
@@ -1131,12 +1294,14 @@ impl DomainSession {
                             &mut selected_mode,
                             SimulationMode::GuidedCurriculum,
                             "13-Regime Tour",
-                        );
+                        )
+                        .on_hover_text("Automatically cycle sequentially across all 13 emergent evolutionary regimes.");
                         ui.selectable_value(
                             &mut selected_mode,
                             SimulationMode::OrganicSandbox,
                             "Autonomous Sandbox",
-                        );
+                        )
+                        .on_hover_text("Free-running ecological and evolutionary sandbox driven by live parameters.");
                     });
                     self.world.mode = selected_mode;
 
@@ -1144,8 +1309,13 @@ impl DomainSession {
                         ui.add(
                             egui::Slider::new(&mut self.world.steps_per_stage, 12..=120)
                                 .text("Ticks / Regime"),
-                        );
-                    } else if ui.button("Stochastic Phase Jump").clicked() {
+                        )
+                        .on_hover_text("Number of ticks spent in each regime before transitioning during Guided Tour mode.");
+                    } else if ui
+                        .button("Stochastic Phase Jump")
+                        .on_hover_text("Trigger a stochastic jump along outgoing evolutionary regime transition pathways.")
+                        .clicked()
+                    {
                         self.world.trigger_network_transition();
                     }
 
@@ -1392,8 +1562,8 @@ impl DomainSession {
                             ui,
                             &mut w.controls.ambient_oxygen_level,
                             0.02..=0.94,
-                            "O2_atm (Target O2)",
-                            "Target atmospheric oxygen mixing ratio for coupled planetary biosphere runs.",
+                            "O2 (PAL Index Target)",
+                            "Target atmospheric oxygen PAL (Present Atmospheric Level) index [0.02, 0.94] for coupled planetary biosphere runs.",
                         ) {
                             w.biosphere.atmospheric_o2 = w.controls.ambient_oxygen_level;
                             changed = true;
@@ -1526,7 +1696,7 @@ impl DomainSession {
                         ui.add_space(4.0);
                         draw_biosphere_gauge(
                             ui,
-                            "O2 (atm)",
+                            "O2 (PAL Index)",
                             &format!("{:.3} (GOE>=0.25)", b.atmospheric_o2),
                             b.atmospheric_o2 as f32,
                             0.0,
@@ -1749,8 +1919,8 @@ impl DomainSession {
 
     fn draw_bottom_telemetry_plots(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("itme_bottom_plots")
-            .min_height(145.0)
-            .default_height(155.0)
+            .min_height(155.0)
+            .default_height(168.0)
             .resizable(true)
             .show(ctx, |ui| {
                 let w = &self.world;
@@ -1764,7 +1934,7 @@ impl DomainSession {
                     ui.separator();
                     ui.colored_label(egui::Color32::from_rgb(80, 220, 255), "Order (O)");
                     if self.coupled_biosphere {
-                        ui.colored_label(egui::Color32::from_rgb(76, 201, 240), "O2 (atm)");
+                        ui.colored_label(egui::Color32::from_rgb(76, 201, 240), "O2 (PAL Index)");
                         ui.colored_label(egui::Color32::from_rgb(80, 227, 137), "N/P Pool");
                         ui.colored_label(egui::Color32::from_rgb(167, 139, 250), "Gibbs/26");
                     } else {
@@ -1786,7 +1956,8 @@ impl DomainSession {
                 });
 
                 let avail = ui.available_size();
-                let (_resp, painter) = ui.allocate_painter(avail, egui::Sense::hover());
+                let (resp, painter) = ui.allocate_painter(avail, egui::Sense::hover());
+                let hover_pos = resp.hover_pos();
                 let rect = painter.clip_rect().shrink(4.0);
                 paint_framed_box(
                     &painter,
@@ -1797,26 +1968,107 @@ impl DomainSession {
                 );
 
                 if w.history.len() < 2 {
+                    painter.text(
+                        rect.center() - egui::vec2(0.0, 9.0),
+                        egui::Align2::CENTER_CENTER,
+                        "Telemetry plots activate after 2+ simulation ticks.",
+                        egui::FontId::proportional(13.0),
+                        egui::Color32::from_rgb(186, 206, 236),
+                    );
+                    painter.text(
+                        rect.center() + egui::vec2(0.0, 11.0),
+                        egui::Align2::CENTER_CENTER,
+                        "Press Play (Space) to stream live trajectories or Step (.) to advance one tick.",
+                        egui::FontId::monospace(10.5),
+                        egui::Color32::from_rgb(125, 211, 252),
+                    );
                     return;
                 }
 
                 let left_plot = egui::Rect::from_min_max(
-                    rect.min + egui::vec2(8.0, 8.0),
-                    egui::pos2(rect.center().x - 6.0, rect.max.y - 8.0),
+                    rect.min + egui::vec2(8.0, 6.0),
+                    egui::pos2(rect.center().x - 6.0, rect.max.y - 6.0),
                 );
                 let right_plot = egui::Rect::from_min_max(
-                    egui::pos2(rect.center().x + 6.0, rect.min.y + 8.0),
-                    rect.max - egui::vec2(8.0, 8.0),
+                    egui::pos2(rect.center().x + 6.0, rect.min.y + 6.0),
+                    rect.max - egui::vec2(8.0, 6.0),
                 );
+
+                let make_inner = |outer: egui::Rect| -> egui::Rect {
+                    egui::Rect::from_min_max(
+                        egui::pos2(outer.left() + 42.0, outer.top() + 18.0),
+                        egui::pos2(outer.right() - 10.0, outer.bottom() - 16.0),
+                    )
+                };
+                let inner_left = make_inner(left_plot);
+                let inner_right = make_inner(right_plot);
+
+                let paint_grid_axes = |inner: egui::Rect, y_max: f32, y_decimals: usize| {
+                    if inner.width() < 24.0 || inner.height() < 16.0 {
+                        return;
+                    }
+                    let grid_col = egui::Color32::from_rgba_unmultiplied(44, 62, 102, 130);
+                    let lbl_col = egui::Color32::from_rgb(138, 158, 196);
+                    let n_hist = w.history.len();
+                    for k in 0..=4 {
+                        let frac = (k as f32) / 4.0;
+                        let y = inner.bottom() - frac * inner.height();
+                        painter.line_segment(
+                            [egui::pos2(inner.left(), y), egui::pos2(inner.right(), y)],
+                            egui::Stroke::new(0.8_f32, grid_col),
+                        );
+                        let y_val = y_max * frac;
+                        let y_lbl = match y_decimals {
+                            0 => format!("{y_val:.0}"),
+                            1 => format!("{y_val:.1}"),
+                            _ => format!("{y_val:.2}"),
+                        };
+                        painter.text(
+                            egui::pos2(inner.left() - 4.0, y),
+                            egui::Align2::RIGHT_CENTER,
+                            y_lbl,
+                            egui::FontId::monospace(8.5),
+                            lbl_col,
+                        );
+
+                        let x = inner.left() + frac * inner.width();
+                        painter.line_segment(
+                            [egui::pos2(x, inner.top()), egui::pos2(x, inner.bottom())],
+                            egui::Stroke::new(0.8_f32, grid_col),
+                        );
+                        let h_idx = ((frac * ((n_hist - 1) as f32)).round() as usize).min(n_hist - 1);
+                        let ga = self.step_to_ga(w.history[h_idx].step);
+                        let align = if k == 0 {
+                            egui::Align2::LEFT_TOP
+                        } else if k == 4 {
+                            egui::Align2::RIGHT_TOP
+                        } else {
+                            egui::Align2::CENTER_TOP
+                        };
+                        painter.text(
+                            egui::pos2(x, inner.bottom() + 2.0),
+                            align,
+                            format!("{ga:.2}Ga"),
+                            egui::FontId::monospace(8.5),
+                            lbl_col,
+                        );
+                    }
+                    painter.rect_stroke(
+                        inner,
+                        0.0,
+                        egui::Stroke::new(0.9_f32, egui::Color32::from_rgb(44, 62, 100)),
+                    );
+                };
 
                 let max_val = w
                     .history
                     .iter()
                     .map(|m| m.order_o.max(1.4))
                     .fold(1.4_f64, f64::max) as f32;
+                paint_grid_axes(inner_left, max_val, 2);
                 draw_series(
                     &painter,
-                    left_plot,
+                    inner_left,
                     &w.history,
                     |m| m.order_o as f32,
                     0.0,
@@ -1824,17 +2076,20 @@ impl DomainSession {
                     egui::Color32::from_rgb(80, 220, 255),
                 );
                 painter.text(
-                    left_plot.left_top() + egui::vec2(6.0, 4.0),
+                    egui::pos2(inner_left.left(), left_plot.top() + 2.0),
                     egui::Align2::LEFT_TOP,
                     format!("Order O [0 .. {:.2}]", max_val),
-                    egui::FontId::monospace(10.5),
+                    egui::FontId::monospace(10.0),
                     egui::Color32::from_rgb(175, 190, 220),
                 );
 
+                let right_y_max: f32;
                 if self.coupled_biosphere {
+                    right_y_max = 1.0;
+                    paint_grid_axes(inner_right, right_y_max, 2);
                     draw_series(
                         &painter,
-                        right_plot,
+                        inner_right,
                         &w.history,
                         |m| m.planetary_o2_level as f32,
                         0.0,
@@ -1843,7 +2098,7 @@ impl DomainSession {
                     );
                     draw_series(
                         &painter,
-                        right_plot,
+                        inner_right,
                         &w.history,
                         |m| m.planetary_nutrient_pool as f32,
                         0.0,
@@ -1852,7 +2107,7 @@ impl DomainSession {
                     );
                     draw_series(
                         &painter,
-                        right_plot,
+                        inner_right,
                         &w.history,
                         |m| (m.chemical_disequilibrium_bits as f32) / 26.0,
                         0.0,
@@ -1860,16 +2115,16 @@ impl DomainSession {
                         egui::Color32::from_rgb(167, 139, 250),
                     );
                     painter.text(
-                        right_plot.left_top() + egui::vec2(6.0, 4.0),
+                        egui::pos2(inner_right.left(), right_plot.top() + 2.0),
                         egui::Align2::LEFT_TOP,
                         format!(
-                            "O2={:.2} | N/P={:.2} | Gibbs={:.1}b | CO2={:.0}ppm",
+                            "O2 (PAL)={:.2} | N/P={:.2} | Gibbs={:.1}b | CO2={:.0}ppm",
                             w.biosphere.atmospheric_o2,
                             w.biosphere.nutrient_pool_np,
                             w.biosphere.chemical_disequilibrium_bits,
                             w.biosphere.atmospheric_co2_ppm
                         ),
-                        egui::FontId::monospace(10.5),
+                        egui::FontId::monospace(10.0),
                         egui::Color32::from_rgb(175, 190, 220),
                     );
                 } else {
@@ -1881,9 +2136,11 @@ impl DomainSession {
                             .map(|m| m.hydrogenosome_count.max(m.mitosome_count) as f32)
                             .fold(10.0_f32, f32::max)
                             * 1.15;
+                        right_y_max = max_right;
+                        paint_grid_axes(inner_right, max_right, 0);
                         draw_series(
                             &painter,
-                            right_plot,
+                            inner_right,
                             &w.history,
                             |m| m.hydrogenosome_count as f32,
                             0.0,
@@ -1892,7 +2149,7 @@ impl DomainSession {
                         );
                         draw_series(
                             &painter,
-                            right_plot,
+                            inner_right,
                             &w.history,
                             |m| m.mitosome_count as f32,
                             0.0,
@@ -1900,10 +2157,10 @@ impl DomainSession {
                             egui::Color32::from_rgb(255, 209, 102),
                         );
                         painter.text(
-                            right_plot.left_top() + egui::vec2(6.0, 4.0),
+                            egui::pos2(inner_right.left(), right_plot.top() + 2.0),
                             egui::Align2::LEFT_TOP,
                             format!("Hydrogenosomes & Mitosomes [0 .. {:.0}]", max_right),
-                            egui::FontId::monospace(10.5),
+                            egui::FontId::monospace(10.0),
                             egui::Color32::from_rgb(175, 190, 220),
                         );
                     }
@@ -1914,9 +2171,11 @@ impl DomainSession {
                             .map(|m| m.mean_cultural_repertoire_bits.max(m.mean_exosomatic_archive_bits) as f32)
                             .fold(8.0_f32, f32::max)
                             * 1.15;
+                        right_y_max = max_right;
+                        paint_grid_axes(inner_right, max_right, 1);
                         draw_series(
                             &painter,
-                            right_plot,
+                            inner_right,
                             &w.history,
                             |m| m.mean_cultural_repertoire_bits as f32,
                             0.0,
@@ -1925,7 +2184,7 @@ impl DomainSession {
                         );
                         draw_series(
                             &painter,
-                            right_plot,
+                            inner_right,
                             &w.history,
                             |m| m.mean_exosomatic_archive_bits as f32,
                             0.0,
@@ -1933,10 +2192,10 @@ impl DomainSession {
                             egui::Color32::from_rgb(255, 209, 102),
                         );
                         painter.text(
-                            right_plot.left_top() + egui::vec2(6.0, 4.0),
+                            egui::pos2(inner_right.left(), right_plot.top() + 2.0),
                             egui::Align2::LEFT_TOP,
                             format!("Cultural & Written Archive Bits [0 .. {:.1}]", max_right),
-                            egui::FontId::monospace(10.5),
+                            egui::FontId::monospace(10.0),
                             egui::Color32::from_rgb(175, 190, 220),
                         );
                     }
@@ -1947,9 +2206,11 @@ impl DomainSession {
                             .map(|m| (m.mean_verified_theorem_bits as f32).max(m.mean_tail_diversity as f32 * 10.0))
                             .fold(10.0_f32, f32::max)
                             * 1.15;
+                        right_y_max = max_right;
+                        paint_grid_axes(inner_right, max_right, 1);
                         draw_series(
                             &painter,
-                            right_plot,
+                            inner_right,
                             &w.history,
                             |m| m.mean_verified_theorem_bits as f32,
                             0.0,
@@ -1958,7 +2219,7 @@ impl DomainSession {
                         );
                         draw_series(
                             &painter,
-                            right_plot,
+                            inner_right,
                             &w.history,
                             |m| (m.mean_tail_diversity as f32) * 10.0,
                             0.0,
@@ -1966,14 +2227,142 @@ impl DomainSession {
                             egui::Color32::from_rgb(199, 125, 255),
                         );
                         painter.text(
-                            right_plot.left_top() + egui::vec2(6.0, 4.0),
+                            egui::pos2(inner_right.left(), right_plot.top() + 2.0),
                             egui::Align2::LEFT_TOP,
                             format!("Verified Theorem Bits & TailDiv [0 .. {:.1}]", max_right),
-                            egui::FontId::monospace(10.5),
+                            egui::FontId::monospace(10.0),
                             egui::Color32::from_rgb(175, 190, 220),
                         );
                     }
                     }
+                }
+
+                // Linked hover crosshair + Ga/series value readout across both telemetry plots
+                let hovered_plot = hover_pos.and_then(|hp| {
+                    if inner_left.width() > 4.0 && inner_left.contains(hp) {
+                        Some((true, inner_left, hp))
+                    } else if inner_right.width() > 4.0 && inner_right.contains(hp) {
+                        Some((false, inner_right, hp))
+                    } else {
+                        None
+                    }
+                });
+                if let Some((is_left, active_inner, hp)) = hovered_plot {
+                    let n = w.history.len();
+                    let t_x = ((hp.x - active_inner.left()) / active_inner.width()).clamp(0.0, 1.0);
+                    let idx = ((t_x * ((n - 1) as f32)).round() as usize).min(n - 1);
+                    let x_frac = (idx as f32) / ((n - 1) as f32);
+                    let m_at = &w.history[idx];
+                    let ga_at = self.step_to_ga(m_at.step);
+
+                    let cross_col = egui::Color32::from_rgba_unmultiplied(226, 232, 240, 145);
+                    for plot_box in [inner_left, inner_right] {
+                        if plot_box.width() > 4.0 && plot_box.height() > 4.0 {
+                            let sx = plot_box.left() + x_frac * plot_box.width();
+                            painter.line_segment(
+                                [egui::pos2(sx, plot_box.top()), egui::pos2(sx, plot_box.bottom())],
+                                egui::Stroke::new(1.0_f32, cross_col),
+                            );
+                        }
+                    }
+                    painter.line_segment(
+                        [
+                            egui::pos2(active_inner.left(), hp.y),
+                            egui::pos2(active_inner.right(), hp.y),
+                        ],
+                        egui::Stroke::new(
+                            0.9_f32,
+                            egui::Color32::from_rgba_unmultiplied(148, 163, 184, 110),
+                        ),
+                    );
+
+                    let plot_pt = |box_r: egui::Rect, val: f32, ymax: f32| -> egui::Pos2 {
+                        let sx = box_r.left() + x_frac * box_r.width();
+                        let ny = (val / ymax.max(1e-5)).clamp(0.0, 1.0);
+                        egui::pos2(sx, box_r.bottom() - ny * box_r.height())
+                    };
+                    let o_pt = plot_pt(inner_left, m_at.order_o as f32, max_val);
+                    painter.circle_filled(o_pt, 3.3, egui::Color32::from_rgb(80, 220, 255));
+                    painter.circle_stroke(o_pt, 3.8, egui::Stroke::new(1.0_f32, egui::Color32::WHITE));
+
+                    let y_frac = ((active_inner.bottom() - hp.y) / active_inner.height()).clamp(0.0, 1.0);
+                    let cursor_y = y_frac * if is_left { max_val } else { right_y_max };
+
+                    let l1 = format!("Tick {} | {:.3} Ga", m_at.step, ga_at);
+                    let (l2, l3, accent) = if is_left {
+                        (
+                            format!(
+                                "Order O: {:.3} (L_I={:.2}, S_T-={:.2})",
+                                m_at.order_o, m_at.leverage_li, m_at.stability_st
+                            ),
+                            format!("O_pop: {:.2} | Cursor Y: {:.3}", m_at.ecosystem_order_pop, cursor_y),
+                            egui::Color32::from_rgb(80, 220, 255),
+                        )
+                    } else if self.coupled_biosphere {
+                        let p_o2 = plot_pt(inner_right, m_at.planetary_o2_level as f32, 1.0);
+                        let p_np = plot_pt(inner_right, m_at.planetary_nutrient_pool as f32, 1.0);
+                        let p_gb = plot_pt(inner_right, (m_at.chemical_disequilibrium_bits as f32) / 26.0, 1.0);
+                        painter.circle_filled(p_o2, 3.1, egui::Color32::from_rgb(76, 201, 240));
+                        painter.circle_filled(p_np, 3.1, egui::Color32::from_rgb(80, 227, 137));
+                        painter.circle_filled(p_gb, 3.1, egui::Color32::from_rgb(167, 139, 250));
+                        (
+                            format!(
+                                "O2 (PAL): {:.3} | N/P: {:.3}",
+                                m_at.planetary_o2_level, m_at.planetary_nutrient_pool
+                            ),
+                            format!(
+                                "Gibbs: {:.2}b | CO2: {:.0}ppm | Y: {:.3}",
+                                m_at.chemical_disequilibrium_bits, m_at.planetary_co2_ppm, cursor_y
+                            ),
+                            egui::Color32::from_rgb(76, 201, 240),
+                        )
+                    } else {
+                        match self.organism {
+                            OrganismKind::RnaDnaProtein => {
+                                let p1 = plot_pt(inner_right, m_at.hydrogenosome_count as f32, right_y_max);
+                                let p2 = plot_pt(inner_right, m_at.mitosome_count as f32, right_y_max);
+                                painter.circle_filled(p1, 3.1, egui::Color32::from_rgb(6, 214, 160));
+                                painter.circle_filled(p2, 3.1, egui::Color32::from_rgb(255, 209, 102));
+                                (
+                                    format!(
+                                        "Hydro: {} | MitoS: {} | MRO->0: {}",
+                                        m_at.hydrogenosome_count, m_at.mitosome_count, m_at.amiteukaryote_count
+                                    ),
+                                    format!("Order O: {:.3} | Cursor Y: {:.1}", m_at.order_o, cursor_y),
+                                    egui::Color32::from_rgb(6, 214, 160),
+                                )
+                            }
+                            OrganismKind::HominidPopulation => {
+                                let p1 = plot_pt(inner_right, m_at.mean_cultural_repertoire_bits as f32, right_y_max);
+                                let p2 = plot_pt(inner_right, m_at.mean_exosomatic_archive_bits as f32, right_y_max);
+                                painter.circle_filled(p1, 3.1, egui::Color32::from_rgb(6, 214, 160));
+                                painter.circle_filled(p2, 3.1, egui::Color32::from_rgb(255, 209, 102));
+                                (
+                                    format!(
+                                        "Culture: {:.2}b | Archive: {:.2}b",
+                                        m_at.mean_cultural_repertoire_bits, m_at.mean_exosomatic_archive_bits
+                                    ),
+                                    format!("Order O: {:.3} | Cursor Y: {:.2}b", m_at.order_o, cursor_y),
+                                    egui::Color32::from_rgb(6, 214, 160),
+                                )
+                            }
+                            OrganismKind::ArtificialIntelligence => {
+                                let p1 = plot_pt(inner_right, m_at.mean_verified_theorem_bits as f32, right_y_max);
+                                let p2 = plot_pt(inner_right, (m_at.mean_tail_diversity as f32) * 10.0, right_y_max);
+                                painter.circle_filled(p1, 3.1, egui::Color32::from_rgb(6, 214, 160));
+                                painter.circle_filled(p2, 3.1, egui::Color32::from_rgb(199, 125, 255));
+                                (
+                                    format!(
+                                        "Theorems: {:.2}b | TailDiv: {:.3}",
+                                        m_at.mean_verified_theorem_bits, m_at.mean_tail_diversity
+                                    ),
+                                    format!("Order O: {:.3} | Cursor Y: {:.2}", m_at.order_o, cursor_y),
+                                    egui::Color32::from_rgb(199, 125, 255),
+                                )
+                            }
+                        }
+                    };
+                    paint_hover_tooltip(&painter, rect, hp, &[&l1, &l2, &l3], accent);
                 }
             });
     }
@@ -2145,7 +2534,7 @@ impl DomainSession {
             panel_rect.right_top() + egui::vec2(-12.0, 10.0),
             egui::Align2::RIGHT_TOP,
             format!(
-                "Final: Ch:{}/5 | MI:{:.1}b | L_I:{:.2} | O2:{:.3} | CO2:{:.0} ppm",
+                "Final: Ch:{}/5 | MI:{:.1}b | L_I:{:.2} | O2 (PAL):{:.3} | CO2:{:.0} ppm",
                 last.heritable_channels_active,
                 last.heritable_mutual_info_bits,
                 last.informational_leverage_li,
@@ -2223,7 +2612,7 @@ impl DomainSession {
             p.text(
                 left_chart.left_top() + egui::vec2(10.0, 6.0),
                 egui::Align2::LEFT_TOP,
-                "Panel A | Atmosphere: Free O2 (Cyan) & log10(CO2) (Amber)",
+                "Panel A | Atmosphere: O2 PAL Index (Cyan) & log10(CO2) (Amber)",
                 egui::FontId::proportional(10.5),
                 egui::Color32::from_rgb(226, 232, 240),
             );
@@ -2494,7 +2883,7 @@ impl DomainSession {
             "MI (b)",
             "L_I",
             "v_O",
-            "O2",
+            "O2(PAL)",
             "CO2",
             "Exergy",
             "Landmark Transition",
@@ -3450,22 +3839,130 @@ fn paint_scene_3d(
         })
         .collect();
 
+    let fog_for_depth = |d: f64| -> f32 {
+        ((d - (camera.distance - 2.1)) / 4.2).clamp(0.0, 1.0) as f32
+    };
+    let apply_fog = |c: [u8; 3], fog_t: f32, alpha: u8| -> egui::Color32 {
+        let mix = (fog_t * 0.45).clamp(0.0, 0.65);
+        let r = (f32::from(c[0]) * (1.0 - mix) + 9.0 * mix).clamp(0.0, 255.0) as u8;
+        let g = (f32::from(c[1]) * (1.0 - mix) + 13.0 * mix).clamp(0.0, 255.0) as u8;
+        let b = (f32::from(c[2]) * (1.0 - mix) + 24.0 * mix).clamp(0.0, 255.0) as u8;
+        egui::Color32::from_rgba_unmultiplied(r, g, b, alpha)
+    };
+    let shade_rgb = |c: [u8; 3], fog_t: f32, light_scale: f32, spec_mix: f32| -> egui::Color32 {
+        let mix = (fog_t * 0.45).clamp(0.0, 0.65);
+        let br = f32::from(c[0]) * (1.0 - mix) + 9.0 * mix;
+        let bg = f32::from(c[1]) * (1.0 - mix) + 13.0 * mix;
+        let bb = f32::from(c[2]) * (1.0 - mix) + 24.0 * mix;
+        let r = (br * light_scale * (1.0 - spec_mix) + 248.0 * spec_mix).clamp(0.0, 255.0) as u8;
+        let g = (bg * light_scale * (1.0 - spec_mix) + 252.0 * spec_mix).clamp(0.0, 255.0) as u8;
+        let b = (bb * light_scale * (1.0 - spec_mix) + 255.0 * spec_mix).clamp(0.0, 255.0) as u8;
+        egui::Color32::from_rgb(r, g, b)
+    };
+
+    enum DrawItem3D {
+        Segment {
+            p1: egui::Pos2,
+            p2: egui::Pos2,
+            depth: f64,
+            width: f32,
+            color: egui::Color32,
+        },
+        Node {
+            idx: usize,
+            depth: f64,
+        },
+    }
+    impl DrawItem3D {
+        fn depth(&self) -> f64 {
+            match self {
+                Self::Segment { depth, .. } => *depth,
+                Self::Node { depth, .. } => *depth,
+            }
+        }
+        fn kind_rank(&self) -> u8 {
+            match self {
+                Self::Segment { .. } => 0,
+                Self::Node { .. } => 1,
+            }
+        }
+    }
+
+    let mut draw_items: Vec<DrawItem3D> =
+        Vec::with_capacity(scene.nodes_3d.len() + scene.edges_3d.len() * 4);
+
+    let view_expand = rect.expand(48.0);
     for e in &scene.edges_3d {
         if e.a >= proj.len() || e.b >= proj.len() {
             continue;
         }
-        let (p1, _, _) = proj[e.a];
-        let (p2, _, _) = proj[e.b];
-        if !rect.contains(p1) && !rect.contains(p2) {
+        let (p1, d1, _) = proj[e.a];
+        let (p2, d2, _) = proj[e.b];
+        if !view_expand.intersects(egui::Rect::from_two_pos(p1, p2)) {
             continue;
         }
-        let [r, g, b] = e.color;
-        let col = egui::Color32::from_rgba_unmultiplied(r, g, b, if e.dashed { 145 } else { 215 });
-        painter.line_segment([p1, p2], egui::Stroke::new(e.width as f32, col));
+        let len_px = p1.distance(p2);
+        if len_px < 0.5 {
+            continue;
+        }
+        let alpha = if e.dashed { 185 } else { 225 };
+        if e.dashed {
+            let dash_px = 6.0_f32;
+            let gap_px = 4.5_f32;
+            let period = dash_px + gap_px;
+            let mut s = 0.0_f32;
+            while s < len_px {
+                let t0 = (s / len_px).clamp(0.0, 1.0);
+                let t1 = ((s + dash_px) / len_px).clamp(0.0, 1.0);
+                if t1 > t0 + 1e-4 {
+                    let q1 = p1.lerp(p2, t0);
+                    let q2 = p1.lerp(p2, t1);
+                    let d_mid = d1 + (d2 - d1) * (0.5 * f64::from(t0 + t1));
+                    let fog_t = fog_for_depth(d_mid);
+                    draw_items.push(DrawItem3D::Segment {
+                        p1: q1,
+                        p2: q2,
+                        depth: d_mid,
+                        width: e.width as f32,
+                        color: apply_fog(e.color, fog_t, alpha),
+                    });
+                }
+                s += period;
+            }
+        } else {
+            let segs = if (d1 - d2).abs() > 0.35 || len_px > 60.0 {
+                4
+            } else {
+                1
+            };
+            for k in 0..segs {
+                let t0 = (k as f32) / (segs as f32);
+                let t1 = ((k + 1) as f32) / (segs as f32);
+                let q1 = p1.lerp(p2, t0);
+                let q2 = p1.lerp(p2, t1);
+                let d_mid = d1 + (d2 - d1) * (0.5 * f64::from(t0 + t1));
+                let fog_t = fog_for_depth(d_mid);
+                draw_items.push(DrawItem3D::Segment {
+                    p1: q1,
+                    p2: q2,
+                    depth: d_mid,
+                    width: e.width as f32,
+                    color: apply_fog(e.color, fog_t, alpha),
+                });
+            }
+        }
     }
 
-    let mut order: Vec<usize> = (0..scene.nodes_3d.len()).collect();
-    order.sort_by(|&a, &b| proj[b].1.total_cmp(&proj[a].1));
+    for (idx, &(_, depth, _)) in proj.iter().enumerate() {
+        draw_items.push(DrawItem3D::Node { idx, depth });
+    }
+
+    // Back-to-front depth-interleaved painter's pass across edges and nodes
+    draw_items.sort_by(|a, b| {
+        b.depth()
+            .total_cmp(&a.depth())
+            .then_with(|| a.kind_rank().cmp(&b.kind_rank()))
+    });
 
     struct Label3D {
         center: egui::Pos2,
@@ -3475,35 +3972,93 @@ fn paint_scene_3d(
         col: egui::Color32,
     }
     let mut labels_3d: Vec<Label3D> = Vec::new();
-    let mut hovered_node: Option<(usize, egui::Pos2, f32, f32)> = None;
+    let mut hovered_node: Option<(usize, egui::Pos2, f32, f32, f64)> = None;
 
-    for idx in order {
-        let node = &scene.nodes_3d[idx];
-        let (center, depth, persp) = proj[idx];
-        if !rect.contains(center) {
-            continue;
-        }
-        let rad = ((node.radius * persp) as f32).clamp(2.5, 22.0);
-        let [r, g, b] = node.color;
-        let node_col = egui::Color32::from_rgb(r, g, b);
-        painter.circle_filled(center, rad, node_col);
-
-        if let Some(hp) = hover_pos {
-            let d = center.distance(hp);
-            let hit_r = (rad + 7.0).max(11.0);
-            if d <= hit_r && hovered_node.map_or(true, |(_, _, _, best_d)| d < best_d) {
-                hovered_node = Some((idx, center, rad, d));
+    for item in draw_items {
+        match item {
+            DrawItem3D::Segment {
+                p1,
+                p2,
+                depth: _,
+                width,
+                color,
+            } => {
+                painter.line_segment([p1, p2], egui::Stroke::new(width, color));
             }
-        }
+            DrawItem3D::Node { idx, depth } => {
+                let node = &scene.nodes_3d[idx];
+                let (center, _, persp) = proj[idx];
+                if !rect.expand(24.0).contains(center) {
+                    continue;
+                }
+                let rad = ((node.radius * persp) as f32).clamp(2.5, 22.0);
+                let fog_t = fog_for_depth(depth);
+                let glow_f = (node.glow as f32).clamp(0.0, 1.0);
 
-        if show_labels && !node.label.is_empty() && rad >= 4.2 {
-            labels_3d.push(Label3D {
-                center,
-                rad,
-                depth,
-                text: node.label.clone(),
-                col: node_col,
-            });
+                if glow_f > 0.05 {
+                    let outer_a =
+                        ((20.0 + 36.0 * glow_f) * (1.0 - 0.35 * fog_t)).clamp(4.0, 72.0) as u8;
+                    let inner_a =
+                        ((42.0 + 52.0 * glow_f) * (1.0 - 0.30 * fog_t)).clamp(8.0, 110.0) as u8;
+                    painter.circle_filled(
+                        center,
+                        rad * (1.42 + 0.58 * glow_f),
+                        apply_fog(node.color, fog_t, outer_a),
+                    );
+                    painter.circle_filled(
+                        center,
+                        rad * (1.16 + 0.24 * glow_f),
+                        apply_fog(node.color, fog_t, inner_a),
+                    );
+                }
+
+                // 3D sphere shading: shadow rim + lit hemisphere + top-left specular highlight
+                let rim_col = shade_rgb(node.color, fog_t, 0.58, 0.0);
+                let body_col = shade_rgb(node.color, fog_t, 1.0, 0.0);
+                let spec_mix = 0.62 * (1.0 - 0.55 * fog_t);
+                let spec_col = shade_rgb(node.color, fog_t, 1.08, spec_mix);
+
+                painter.circle_filled(center, rad, rim_col);
+                painter.circle_filled(
+                    center + egui::vec2(-rad * 0.13, -rad * 0.13),
+                    rad * 0.85,
+                    body_col,
+                );
+                if rad >= 3.2 {
+                    painter.circle_filled(
+                        center + egui::vec2(-rad * 0.30, -rad * 0.30),
+                        (rad * 0.32).max(1.0),
+                        spec_col,
+                    );
+                }
+                painter.circle_stroke(
+                    center,
+                    rad,
+                    egui::Stroke::new(0.7_f32, egui::Color32::from_rgb(8, 12, 22)),
+                );
+
+                if let Some(hp) = hover_pos {
+                    let d = center.distance(hp);
+                    let hit_r = (rad + 7.0).max(11.0);
+                    if d <= hit_r
+                        && hovered_node.map_or(true, |(_, _, _, best_d, best_z)| {
+                            depth < best_z - 0.15 || ((depth - best_z).abs() <= 0.15 && d < best_d)
+                        })
+                    {
+                        hovered_node = Some((idx, center, rad, d, depth));
+                    }
+                }
+
+                if show_labels && !node.label.is_empty() && rad >= 4.2 {
+                    labels_3d.push(Label3D {
+                        center,
+                        rad,
+                        depth,
+                        text: node.label.clone(),
+                        col: body_col,
+                    });
+                }
+            }
         }
     }
 
@@ -3527,7 +4082,7 @@ fn paint_scene_3d(
         }
     }
 
-    if let Some((n_idx, center, rad, _)) = hovered_node {
+    if let Some((n_idx, center, rad, _, _)) = hovered_node {
         let n = &scene.nodes_3d[n_idx];
         painter.circle_stroke(
             center,
@@ -3576,13 +4131,30 @@ fn paint_scene_2d(
             let p1 = to_screen(scene.nodes_2d[e.a].x, scene.nodes_2d[e.a].y);
             let p2 = to_screen(scene.nodes_2d[e.b].x, scene.nodes_2d[e.b].y);
             let [r, g, b] = e.color;
-            painter.line_segment(
-                [p1, p2],
-                egui::Stroke::new(
-                    e.width as f32,
-                    egui::Color32::from_rgba_unmultiplied(r, g, b, 195),
-                ),
-            );
+            let col = egui::Color32::from_rgba_unmultiplied(r, g, b, 195);
+            let stroke = egui::Stroke::new(e.width as f32, col);
+            let delta = p2 - p1;
+            let len = delta.length();
+            if e.directed && len > 6.0 {
+                let u = delta / len;
+                let perp = egui::vec2(-u.y, u.x);
+                let rad_b = ((scene.nodes_2d[e.b].radius as f32) * scale).clamp(4.0, 12.0);
+                let inset = (rad_b + 1.5).min(len * 0.45);
+                let tip = p2 - u * inset;
+                let arrow_len = (7.0 + (e.width as f32) * 1.1).min((len - inset).max(4.0) * 0.65);
+                let half_w = arrow_len * 0.44;
+                let shaft_end = tip - u * (arrow_len * 0.72);
+                painter.line_segment([p1, shaft_end], stroke);
+                let w1 = tip - u * arrow_len + perp * half_w;
+                let w2 = tip - u * arrow_len - perp * half_w;
+                painter.add(egui::Shape::convex_polygon(
+                    vec![tip, w1, w2],
+                    col,
+                    egui::Stroke::NONE,
+                ));
+            } else {
+                painter.line_segment([p1, p2], stroke);
+            }
         }
     }
 
@@ -3601,6 +4173,11 @@ fn paint_scene_2d(
         let [r, g, b] = n.color;
         let col = egui::Color32::from_rgb(r, g, b);
         painter.circle_filled(p, rad, col);
+        painter.circle_stroke(
+            p,
+            rad,
+            egui::Stroke::new(0.8_f32, egui::Color32::from_rgb(10, 14, 26)),
+        );
 
         if let Some(hp) = hover_pos {
             let d = p.distance(hp);
@@ -4239,5 +4816,184 @@ mod tests {
 
         run_key(&mut app, egui::Key::F1);
         assert!(!app.show_about);
+    }
+
+    #[test]
+    fn gui_global_hotkeys_control_playback_camera_layouts_and_escape_with_input_guard() {
+        let ctx = egui::Context::default();
+        let mut app = ItmeGuiApp::new_with_ctx(&ctx, 20250813);
+
+        let session = DomainSession::new_coupled_biosphere(
+            RegimeId::R35Symbiogenetic,
+            SimulationMode::OrganicSandbox,
+            32,
+            20250813,
+        );
+        app.screen = AppScreen::Simulation(Box::new(session));
+
+        // Verify hotkeys are suppressed while a TextEdit has keyboard focus (`ctx.wants_keyboard_input()`)
+        let mut focus_buf = String::from("seed_edit");
+        let step_initial = if let AppScreen::Simulation(ref s) = app.screen {
+            s.world.step_count
+        } else {
+            0
+        };
+        for key in [egui::Key::Space, egui::Key::Period, egui::Key::F1, egui::Key::Escape] {
+            let mut raw = egui::RawInput::default();
+            raw.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 900.0),
+            ));
+            raw.events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            let _ = ctx.run(raw, |c| {
+                egui::Area::new(egui::Id::new("test_focus_area")).show(c, |ui| {
+                    let resp = ui.text_edit_singleline(&mut focus_buf);
+                    resp.request_focus();
+                });
+                assert!(c.wants_keyboard_input());
+                app.draw_panels(c);
+            });
+        }
+        assert!(!app.show_about, "F1 must be ignored while text input has focus");
+        if let AppScreen::Simulation(ref s) = app.screen {
+            assert!(!s.paused, "Space must be ignored while text input has focus");
+            assert_eq!(s.world.step_count, step_initial, "'.' must be ignored while text input has focus");
+        } else {
+            panic!("Esc must be ignored while text input has focus");
+        }
+
+        // Flush one frame without the temporary TextEdit so egui clears text-input focus
+        let mut clear_raw = egui::RawInput::default();
+        clear_raw.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1440.0, 900.0),
+        ));
+        let _ = ctx.run(clear_raw, |c| app.draw_panels(c));
+
+        let send_key = |app: &mut ItmeGuiApp, key: egui::Key| {
+            let mut raw = egui::RawInput::default();
+            raw.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 900.0),
+            ));
+            raw.events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            let _ = ctx.run(raw, |c| app.draw_panels(c));
+        };
+
+        // Space toggles paused
+        send_key(&mut app, egui::Key::Space);
+        if let AppScreen::Simulation(ref s) = app.screen {
+            assert!(s.paused, "Space should pause running simulation");
+        } else {
+            panic!("Expected Simulation screen");
+        }
+
+        // '.' advances 1 step
+        let step_before = if let AppScreen::Simulation(ref s) = app.screen {
+            s.world.step_count
+        } else {
+            0
+        };
+        send_key(&mut app, egui::Key::Period);
+        if let AppScreen::Simulation(ref s) = app.screen {
+            assert_eq!(s.world.step_count, step_before + 1, "'.' should advance one step");
+        }
+
+        // 'R' resets modified camera to Camera3D::default()
+        if let AppScreen::Simulation(ref mut s) = app.screen {
+            s.camera.yaw = 2.4;
+            s.camera.pitch = -0.7;
+            s.camera.zoom = 2.1;
+        }
+        send_key(&mut app, egui::Key::R);
+        let def_cam = Camera3D::default();
+        if let AppScreen::Simulation(ref s) = app.screen {
+            assert!((s.camera.yaw - def_cam.yaw).abs() < 1e-12);
+            assert!((s.camera.pitch - def_cam.pitch).abs() < 1e-12);
+            assert!((s.camera.zoom - def_cam.zoom).abs() < 1e-12);
+        }
+
+        // '1'..'6' switches viewport layouts
+        let expected = [
+            (egui::Key::Num2, ViewportLayout::SpatialGridAnd3D),
+            (egui::Key::Num3, ViewportLayout::PhylogenyFull),
+            (egui::Key::Num4, ViewportLayout::Perspective3D),
+            (egui::Key::Num5, ViewportLayout::Blueprint2D),
+            (egui::Key::Num6, ViewportLayout::GrandTrajectory),
+            (egui::Key::Num1, ViewportLayout::SpatialAndPhylogeny),
+        ];
+        for (key, layout) in expected {
+            send_key(&mut app, key);
+            if let AppScreen::Simulation(ref s) = app.screen {
+                assert_eq!(s.viewport_layout, layout);
+            }
+        }
+
+        // Esc closes About modal first without leaving simulation, then Esc returns to MainMenu
+        send_key(&mut app, egui::Key::F1);
+        assert!(app.show_about);
+        send_key(&mut app, egui::Key::Escape);
+        assert!(!app.show_about);
+        assert!(matches!(app.screen, AppScreen::Simulation(_)));
+
+        send_key(&mut app, egui::Key::Escape);
+        assert!(matches!(app.screen, AppScreen::MainMenu(_)));
+    }
+
+    #[test]
+    fn gui_telemetry_onboarding_crosshair_and_3d_2d_render_headlessly() {
+        let ctx = egui::Context::default();
+        let mut session = DomainSession::new_coupled_biosphere(
+            RegimeId::R35Symbiogenetic,
+            SimulationMode::OrganicSandbox,
+            32,
+            202607,
+        );
+        // Simulate fresh world before 2nd history sample (onboarding hint path)
+        session.world.history.truncate(1);
+        session.paused = true;
+        session.show_milestones = false;
+        let mut app = ItmeGuiApp::new_with_ctx(&ctx, 202607);
+        app.screen = AppScreen::Simulation(Box::new(session));
+
+        let run_frame = |app: &mut ItmeGuiApp, pointer: Option<egui::Pos2>| {
+            let mut raw = egui::RawInput::default();
+            raw.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 900.0),
+            ));
+            if let Some(pos) = pointer {
+                raw.events.push(egui::Event::PointerMoved(pos));
+            }
+            let _ = ctx.run(raw, |c| app.draw_panels(c));
+        };
+
+        run_frame(&mut app, None);
+
+        // Advance steps and test hover crosshair on bottom telemetry plots + 3D/2D renderers
+        if let AppScreen::Simulation(ref mut s) = app.screen {
+            for _ in 0..8 {
+                s.step_once();
+            }
+            s.viewport_layout = ViewportLayout::Perspective3D;
+        }
+        run_frame(&mut app, Some(egui::pos2(500.0, 820.0)));
+
+        if let AppScreen::Simulation(ref mut s) = app.screen {
+            s.viewport_layout = ViewportLayout::Blueprint2D;
+        }
+        run_frame(&mut app, Some(egui::pos2(1020.0, 820.0)));
     }
 }

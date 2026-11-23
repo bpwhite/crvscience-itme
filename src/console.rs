@@ -71,7 +71,7 @@ pub fn run_grand_trajectory_headless(opts: &ConsoleOptions) -> io::Result<()> {
     let summaries = world.run_continuous_grand_trajectory(opts.steps_per_regime.max(12));
     println!(
         " {:<22} {:>7} {:>6} {:>9} {:>10} {:>8} {:>9} {:>8}  {}",
-        "Epoch", "Age(Ga)", "Chan", "MI(bits)", "Lev(L_I)", "O2", "CO2(ppm)", "Exergy", "Transition Landmark"
+        "Epoch", "Age(Ga)", "Chan", "MI(bits)", "Lev(L_I)", "O2(PAL)", "CO2(ppm)", "Exergy", "Transition Landmark"
     );
     println!(" {}", "-".repeat(126));
     let csv_out = SimulationWorld::export_grand_trajectory_csv(&summaries);

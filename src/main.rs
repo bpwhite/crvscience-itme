@@ -57,7 +57,7 @@ OPTIONS:
     --grand-trajectory            Run continuous 4.25 Ga 8-epoch grand trajectory benchmark in headless mode
     --gui                         Force native desktop GUI mode
     --screenshot <FILE>           Render 1600x1000 offscreen GPU screenshot to PNG and exit
-    --screenshot-view <1|2|3>     Select screenshot view preset (1=Overview, 2=Grand Trajectory, 3=Biosphere) [default: 1]
+    --screenshot-view <1|2|3|4>   Select screenshot view preset (1=Main Menu, 2=Molecular, 3=AI, 4=Biosphere) [default: 1]
     --organism <SLUG>             Select `rna`, `hominid`, `ai`, or `all` [default: all]
     --regime <CODE>               Select `all` (13 regimes) or a specific code (`0.0`, `0.5`, `1.0`,
                                   `1.5-AA`, `1.5-RP`, `2.0-EC`, `2.0-BAL`, `2.0-QS`, `3.0-DAR`,
@@ -206,11 +206,11 @@ fn main() {
             "--screenshot-view" => {
                 i += 1;
                 let Some(val) = args.get(i) else {
-                    eprintln!("Error: --screenshot-view requires a view index (1, 2, or 3).");
+                    eprintln!("Error: --screenshot-view requires a view index (1, 2, 3, or 4).");
                     process::exit(2);
                 };
                 screenshot_view = val.parse::<u8>().unwrap_or_else(|_| {
-                    eprintln!("Error: invalid --screenshot-view value '{val}' (expected 1, 2, or 3).");
+                    eprintln!("Error: invalid --screenshot-view value '{val}' (expected 1, 2, 3, or 4).");
                     process::exit(2);
                 });
             }

@@ -14,36 +14,36 @@
       "epoch_count": 8,
       "epoch1_geologic_age_ga": 4.2500,
       "epoch1_o2": 0.060000,
-      "epoch4_goe_o2": 0.604972,
+      "epoch4_goe_o2": 0.656769,
       "epoch8_o2": 0.940000,
       "peak_planetary_o2": 0.940000,
       "epoch1_heritable_mi_bits": 85.429667,
-      "peak_heritable_mi_bits": 1103.608542,
-      "epoch8_heritable_mi_bits": 1103.608542,
+      "peak_heritable_mi_bits": 1086.195764,
+      "epoch8_heritable_mi_bits": 1086.195764,
       "epoch8_co2_ppm": 220.00,
       "csv_artifact": "validation/planetary_epochs_trajectory.csv",
-      "csv_bytes": 1517,
-      "epochs": [{"epoch_index":1,"stage":"Epoch1HadeanHomochirality","tick_end":12,"geologic_age_ga":4.2500,"population_size":34,"heritable_channels_active":1,"heritable_mutual_info_bits":85.429667,"informational_leverage_li":6.148407,"order_velocity_vo":0.122233,"planetary_o2":0.060000,"planetary_co2_ppm":1180.00,"planetary_exergy_budget":1.150000},{"epoch_index":2,"stage":"Epoch2SgcAndRafProtocells","tick_end":24,"geologic_age_ga":4.1800,"population_size":34,"heritable_channels_active":1,"heritable_mutual_info_bits":98.438944,"informational_leverage_li":5.265838,"order_velocity_vo":-0.022371,"planetary_o2":0.060000,"planetary_co2_ppm":1180.00,"planetary_exergy_budget":1.150000},{"epoch_index":3,"stage":"Epoch3RnaToDnaAndLuca","tick_end":36,"geologic_age_ga":4.0500,"population_size":34,"heritable_channels_active":2,"heritable_mutual_info_bits":96.300105,"informational_leverage_li":8.854120,"order_velocity_vo":0.143482,"planetary_o2":0.060000,"planetary_co2_ppm":1180.00,"planetary_exergy_budget":1.150000},{"epoch_index":4,"stage":"Epoch4GoeAndSymbiogenesis","tick_end":48,"geologic_age_ga":1.8500,"population_size":34,"heritable_channels_active":2,"heritable_mutual_info_bits":134.505547,"informational_leverage_li":9.349911,"order_velocity_vo":-0.033445,"planetary_o2":0.604972,"planetary_co2_ppm":550.73,"planetary_exergy_budget":0.841461},{"epoch_index":5,"stage":"Epoch5ClonalMulticellularity","tick_end":60,"geologic_age_ga":0.8000,"population_size":34,"heritable_channels_active":3,"heritable_mutual_info_bits":375.593361,"informational_leverage_li":10.563453,"order_velocity_vo":-0.097503,"planetary_o2":0.669963,"planetary_co2_ppm":269.82,"planetary_exergy_budget":1.279609},{"epoch_index":6,"stage":"Epoch6SuperorganismAgriculture","tick_end":72,"geologic_age_ga":0.0600,"population_size":34,"heritable_channels_active":3,"heritable_mutual_info_bits":800.062383,"informational_leverage_li":21.235622,"order_velocity_vo":0.666487,"planetary_o2":0.730618,"planetary_co2_ppm":220.00,"planetary_exergy_budget":1.460345},{"epoch_index":7,"stage":"Epoch7SymbolicExosomaticArchives","tick_end":84,"geologic_age_ga":0.0050,"population_size":34,"heritable_channels_active":4,"heritable_mutual_info_bits":1069.996796,"informational_leverage_li":30.535333,"order_velocity_vo":-1.027170,"planetary_o2":0.940000,"planetary_co2_ppm":220.00,"planetary_exergy_budget":2.006614},{"epoch_index":8,"stage":"Epoch8Gaia2PlanetaryHomeostasis","tick_end":96,"geologic_age_ga":0.0000,"population_size":34,"heritable_channels_active":5,"heritable_mutual_info_bits":1103.608542,"informational_leverage_li":35.349501,"order_velocity_vo":-0.053462,"planetary_o2":0.940000,"planetary_co2_ppm":220.00,"planetary_exergy_budget":2.122650}]
+      "csv_bytes": 1514,
+      "epochs": [{"epoch_index":1,"stage":"Epoch1HadeanHomochirality","tick_end":12,"geologic_age_ga":4.2500,"population_size":34,"heritable_channels_active":1,"heritable_mutual_info_bits":85.429667,"informational_leverage_li":6.144161,"order_velocity_vo":0.121919,"planetary_o2":0.060000,"planetary_co2_ppm":1180.00,"planetary_exergy_budget":1.150000},{"epoch_index":2,"stage":"Epoch2SgcAndRafProtocells","tick_end":24,"geologic_age_ga":4.1800,"population_size":34,"heritable_channels_active":1,"heritable_mutual_info_bits":95.082208,"informational_leverage_li":5.869109,"order_velocity_vo":-0.014120,"planetary_o2":0.060000,"planetary_co2_ppm":1180.00,"planetary_exergy_budget":1.150000},{"epoch_index":3,"stage":"Epoch3RnaToDnaAndLuca","tick_end":36,"geologic_age_ga":4.0500,"population_size":34,"heritable_channels_active":2,"heritable_mutual_info_bits":94.126591,"informational_leverage_li":8.281019,"order_velocity_vo":0.227747,"planetary_o2":0.060000,"planetary_co2_ppm":1180.00,"planetary_exergy_budget":1.150000},{"epoch_index":4,"stage":"Epoch4GoeAndSymbiogenesis","tick_end":48,"geologic_age_ga":1.8500,"population_size":34,"heritable_channels_active":2,"heritable_mutual_info_bits":199.875051,"informational_leverage_li":8.871816,"order_velocity_vo":0.071153,"planetary_o2":0.656769,"planetary_co2_ppm":524.05,"planetary_exergy_budget":0.813885},{"epoch_index":5,"stage":"Epoch5ClonalMulticellularity","tick_end":60,"geologic_age_ga":0.8000,"population_size":34,"heritable_channels_active":3,"heritable_mutual_info_bits":597.333583,"informational_leverage_li":14.567867,"order_velocity_vo":0.346944,"planetary_o2":0.658271,"planetary_co2_ppm":260.04,"planetary_exergy_budget":1.263818},{"epoch_index":6,"stage":"Epoch6SuperorganismAgriculture","tick_end":72,"geologic_age_ga":0.0600,"population_size":34,"heritable_channels_active":3,"heritable_mutual_info_bits":846.691823,"informational_leverage_li":30.505918,"order_velocity_vo":0.288064,"planetary_o2":0.737244,"planetary_co2_ppm":220.00,"planetary_exergy_budget":1.462924},{"epoch_index":7,"stage":"Epoch7SymbolicExosomaticArchives","tick_end":84,"geologic_age_ga":0.0050,"population_size":34,"heritable_channels_active":4,"heritable_mutual_info_bits":1066.111558,"informational_leverage_li":31.622762,"order_velocity_vo":-2.131413,"planetary_o2":0.940000,"planetary_co2_ppm":220.00,"planetary_exergy_budget":2.006614},{"epoch_index":8,"stage":"Epoch8Gaia2PlanetaryHomeostasis","tick_end":96,"geologic_age_ga":0.0000,"population_size":34,"heritable_channels_active":5,"heritable_mutual_info_bits":1086.195764,"informational_leverage_li":34.451016,"order_velocity_vo":0.267337,"planetary_o2":0.940000,"planetary_co2_ppm":220.00,"planetary_exergy_budget":2.122650}]
     },
     "t2_lineage_diversification_extinction_recovery": {
       "engine_calls": ["SimulationWorld::step", "SimulationWorld::trigger_environmental_shock", "SimulationWorld::trigger_apex_predator_cull", "PhylogenyTracker::compute_summary", "SimulationWorld::export_newick"],
       "pre_shock_population": 34,
       "pre_shock_species_count": 20,
       "immediate_post_cull_population": 26,
-      "mean_grid_exergy_snapshot": 0.939128,
+      "mean_grid_exergy_snapshot": 0.916969,
       "recovered_population": 34,
-      "recovered_species_count": 14,
-      "recovered_ecosystem_order_pop": 2713.741964,
-      "recovered_adami_conservation_rho": 0.934881,
-      "recovered_entropy_production_rate": 161.439324,
-      "phylogeny_active_nodes": 118,
-      "phylogeny_total_speciation_splits": 578,
+      "recovered_species_count": 11,
+      "recovered_ecosystem_order_pop": 3888.750987,
+      "recovered_adami_conservation_rho": 0.894402,
+      "recovered_entropy_production_rate": 165.893215,
+      "phylogeny_active_nodes": 127,
+      "phylogeny_total_speciation_splits": 504,
       "phylogeny_sackin_imbalance": 0.000000,
-      "phylogeny_endosymbiotic_fusions": 61,
-      "newick_leaf_count": 47,
+      "phylogeny_endosymbiotic_fusions": 47,
+      "newick_leaf_count": 59,
       "newick_balanced": true,
       "newick_artifact": "validation/emergent_biosphere_tree.nwk",
-      "newick_bytes": 1793
+      "newick_bytes": 2116
     },
     "t3_geothermal_mutation_sensitivity_ensemble": {
       "engine_calls": ["SimulationWorld::new", "SimulationWorld::step", "SimulationWorld::latest_metrics"],
@@ -51,7 +51,7 @@
       "steps_per_run": 30,
       "total_ensemble_runs": 9,
       "bit_exact_determinism": true,
-      "conditions": [{"condition":"baseline_darwinian","bath_exergy_flux":0.900,"heritable_variation":0.050,"mean_ecosystem_order_pop":29.032097,"sd_ecosystem_order_pop":6.561307,"mean_net_exergy_phi":0.796775,"mean_entropy_production_rate":20.817082,"mean_species_count":7.667},{"condition":"high_geothermal_flux","bath_exergy_flux":2.200,"heritable_variation":0.050,"mean_ecosystem_order_pop":55.589251,"sd_ecosystem_order_pop":6.985443,"mean_net_exergy_phi":2.569212,"mean_entropy_production_rate":47.374859,"mean_species_count":7.667},{"condition":"elevated_variation","bath_exergy_flux":0.900,"heritable_variation":0.220,"mean_ecosystem_order_pop":33.613309,"sd_ecosystem_order_pop":1.310261,"mean_net_exergy_phi":0.741634,"mean_entropy_production_rate":20.118159,"mean_species_count":9.667}]
+      "conditions": [{"condition":"baseline_darwinian","bath_exergy_flux":0.900,"heritable_variation":0.050,"mean_ecosystem_order_pop":24.649842,"sd_ecosystem_order_pop":3.209862,"mean_net_exergy_phi":0.709649,"mean_entropy_production_rate":19.691387,"mean_species_count":7.000},{"condition":"high_geothermal_flux","bath_exergy_flux":2.200,"heritable_variation":0.050,"mean_ecosystem_order_pop":47.615043,"sd_ecosystem_order_pop":5.380488,"mean_net_exergy_phi":2.610067,"mean_entropy_production_rate":47.874144,"mean_species_count":7.000},{"condition":"elevated_variation","bath_exergy_flux":0.900,"heritable_variation":0.220,"mean_ecosystem_order_pop":33.324293,"sd_ecosystem_order_pop":2.654658,"mean_net_exergy_phi":0.830217,"mean_entropy_production_rate":21.320210,"mean_species_count":9.667}]
     }
   }
 }

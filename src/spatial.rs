@@ -81,10 +81,11 @@ impl SpatialGrid {
             }
         }
 
-        let init_e = if base_flux.abs() <= 0.03 {
+        let safe_flux = if base_flux.is_finite() { base_flux } else { 0.0 };
+        let init_e = if safe_flux.abs() <= 0.03 {
             0.0
         } else {
-            base_flux
+            safe_flux
         };
         let exergy = source_profile
             .iter()
@@ -106,6 +107,18 @@ impl SpatialGrid {
     #[inline]
     pub fn idx(&self, x: usize, y: usize) -> usize {
         (y % self.height) * self.width + (x % self.width)
+    }
+
+    #[inline]
+    fn toroidal_stencil(&self, x: usize, y: usize) -> (usize, usize, usize, usize, usize) {
+        let w = self.width;
+        let h = self.height;
+        let c = self.idx(x, y);
+        let left = self.idx((x + w - 1) % w, y);
+        let right = self.idx((x + 1) % w, y);
+        let up = self.idx(x, (y + h - 1) % h);
+        let down = self.idx(x, (y + 1) % h);
+        (c, left, right, up, down)
     }
 
     #[inline]
@@ -153,6 +166,13 @@ impl SpatialGrid {
         niche_decay: f64,
         niche_diffusion: f64,
     ) {
+        if !bath_exergy_flux.is_finite()
+            || !exergy_diffusion.is_finite()
+            || !niche_decay.is_finite()
+            || !niche_diffusion.is_finite()
+        {
+            return;
+        }
         if bath_exergy_flux.abs() <= 0.03 {
             self.exergy.fill(0.0);
             for b in &mut self.byproduct {
@@ -182,11 +202,7 @@ impl SpatialGrid {
 
         for y in 0..h {
             for x in 0..w {
-                let c = y * w + x;
-                let left = y * w + x.saturating_sub(1);
-                let right = y * w + (x + 1).min(w - 1);
-                let up = y.saturating_sub(1) * w + x;
-                let down = (y + 1).min(h - 1) * w + x;
+                let (c, left, right, up, down) = self.toroidal_stencil(x, y);
 
                 let lap_e = self.exergy[left] + self.exergy[right] + self.exergy[up]
                     + self.exergy[down]
@@ -204,11 +220,7 @@ impl SpatialGrid {
         let decay_b = 0.085;
         for y in 0..h {
             for x in 0..w {
-                let c = y * w + x;
-                let left = y * w + x.saturating_sub(1);
-                let right = y * w + (x + 1).min(w - 1);
-                let up = y.saturating_sub(1) * w + x;
-                let down = (y + 1).min(h - 1) * w + x;
+                let (c, left, right, up, down) = self.toroidal_stencil(x, y);
 
                 let lap_b = self.byproduct[left] + self.byproduct[right] + self.byproduct[up]
                     + self.byproduct[down]
@@ -223,11 +235,7 @@ impl SpatialGrid {
         let decay = niche_decay.clamp(0.005, 0.35);
         for y in 0..h {
             for x in 0..w {
-                let c = y * w + x;
-                let left = y * w + x.saturating_sub(1);
-                let right = y * w + (x + 1).min(w - 1);
-                let up = y.saturating_sub(1) * w + x;
-                let down = (y + 1).min(h - 1) * w + x;
+                let (c, left, right, up, down) = self.toroidal_stencil(x, y);
 
                 let lap_n = self.niche[left] + self.niche[right] + self.niche[up]
                     + self.niche[down]
@@ -299,13 +307,12 @@ impl SpatialGrid {
         };
 
         let mut best_val = eval_cell(x, y);
-        let x_min = x.saturating_sub(1);
-        let x_max = (x + 1).min(self.width - 1);
-        let y_min = y.saturating_sub(1);
-        let y_max = (y + 1).min(self.height - 1);
-
-        for ny in y_min..=y_max {
-            for nx in x_min..=x_max {
+        let w = self.width;
+        let h = self.height;
+        for dy in [h - 1, 0, 1] {
+            for dx in [w - 1, 0, 1] {
+                let nx = (x + dx) % w;
+                let ny = (y + dy) % h;
                 let score = eval_cell(nx, ny);
                 if score > best_val + 0.015 {
                     best_val = score;

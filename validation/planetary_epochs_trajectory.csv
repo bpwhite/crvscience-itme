@@ -1,9 +1,9 @@
 epoch_index,epoch_stage,tick_end,geologic_age_ga,population_size,heritable_channels_active,heritable_mutual_info_bits,informational_leverage_li,order_velocity_vo,planetary_o2,planetary_co2_ppm,planetary_exergy_budget,landmark_summary
-1,Epoch1HadeanHomochirality,12,4.2500,34,1,85.429667,6.148407,0.122233,0.060000,1180.00,1.150000,Magnetite CISS ee_D=59% + Minihelix ee_L=33%
-2,Epoch2SgcAndRafProtocells,24,4.1800,34,1,98.438944,5.265838,-0.022371,0.060000,1180.00,1.150000,"Universal 20-AA SGC (n=34, MP=81.1%) + RAF Closure"
-3,Epoch3RnaToDnaAndLuca,36,4.0500,34,2,96.300105,8.854120,0.143482,0.060000,1180.00,1.150000,"Darwinian LUCA (n=34) + RNR/UDG T-DNA (1851 kb, n=34)"
-4,Epoch4GoeAndSymbiogenesis,48,1.8500,34,2,134.505547,9.349911,-0.033445,0.604972,550.73,0.841461,GOE Oxygenation (O2=0.60) + Asgard-Mito/Plastid LECA Holobionts
-5,Epoch5ClonalMulticellularity,60,0.8000,34,3,375.593361,10.563453,-0.097503,0.669963,269.82,1.279609,Clonal r=1.0 Zygote + Germ-Soma Multicellularity (n=4) + Apoptosis
-6,Epoch6SuperorganismAgriculture,72,0.0600,34,3,800.062383,21.235622,0.666487,0.730618,220.00,1.460345,Kin-Policed Superorganisms (n=7) + 8n Clonal Crop Symbiosis (n=11)
-7,Epoch7SymbolicExosomaticArchives,84,0.0050,34,4,1069.996796,30.535333,-1.027170,0.940000,220.00,2.006614,Symbolic Culture + Verified Written Archives + Formal AI Symbiosis (n=24)
-8,Epoch8Gaia2PlanetaryHomeostasis,96,0.0000,34,5,1103.608542,35.349501,-0.053462,0.940000,220.00,2.122650,"Gaia-2.0 Homeostatic Awakening (n=34, Exergy=2.12)"
+1,Epoch1HadeanHomochirality,12,4.2500,34,1,85.429667,6.144161,0.121919,0.060000,1180.00,1.150000,Magnetite CISS ee_D=59% + Minihelix ee_L=33%
+2,Epoch2SgcAndRafProtocells,24,4.1800,34,1,95.082208,5.869109,-0.014120,0.060000,1180.00,1.150000,"Universal 20-AA SGC (n=34, MP=81.1%) + RAF Closure"
+3,Epoch3RnaToDnaAndLuca,36,4.0500,34,2,94.126591,8.281019,0.227747,0.060000,1180.00,1.150000,"Darwinian LUCA (n=34) + RNR/UDG T-DNA (1851 kb, n=34)"
+4,Epoch4GoeAndSymbiogenesis,48,1.8500,34,2,199.875051,8.871816,0.071153,0.656769,524.05,0.813885,GOE Oxygenation (O2=0.66) + Asgard-Mito/Plastid LECA Holobionts
+5,Epoch5ClonalMulticellularity,60,0.8000,34,3,597.333583,14.567867,0.346944,0.658271,260.04,1.263818,Clonal r=1.0 Zygote + Germ-Soma Multicellularity (n=2) + Apoptosis
+6,Epoch6SuperorganismAgriculture,72,0.0600,34,3,846.691823,30.505918,0.288064,0.737244,220.00,1.462924,Kin-Policed Superorganisms (n=3) + 8n Clonal Crop Symbiosis (n=11)
+7,Epoch7SymbolicExosomaticArchives,84,0.0050,34,4,1066.111558,31.622762,-2.131413,0.940000,220.00,2.006614,Symbolic Culture + Verified Written Archives + Formal AI Symbiosis (n=23)
+8,Epoch8Gaia2PlanetaryHomeostasis,96,0.0000,34,5,1086.195764,34.451016,0.267337,0.940000,220.00,2.122650,"Gaia-2.0 Homeostatic Awakening (n=34, Exergy=2.12)"
