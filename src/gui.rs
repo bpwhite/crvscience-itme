@@ -23,7 +23,8 @@ use crate::engine::{SimulationMode, SimulationWorld};
 use crate::geometry::{Camera3D, StructureScene};
 use crate::model::{
     AbiogenesisStage, AgricultureState, ChiralityCodeStage, CulturalState, EusocialState,
-    ExosomaticState, GenomeSubstrateStage, GrandTrajectoryEpochSummary, MachineSynthesisState,
+    ExosomaticState, GenomeSubstrateStage, GrandEpochStage, GrandTrajectoryEpochSummary,
+    MachineSynthesisState,
     MroClass, MulticellularState, OrderPhase, PlanetaryBiosphere, PlanetaryState, TrophicGuild,
 };
 use crate::organisms::OrganismKind;
@@ -123,6 +124,11 @@ struct DomainSession {
     last_step_instant: Instant,
     export_status: Option<(String, bool)>,
     grand_epochs: Vec<GrandTrajectoryEpochSummary>,
+    initial_seed: u64,
+    cmd_palette_open: bool,
+    cmd_palette_just_opened: bool,
+    cmd_palette_query: String,
+    cmd_palette_cursor: usize,
     wants_main_menu: bool,
     wants_about: bool,
 }
@@ -158,17 +164,37 @@ impl ItmeGuiApp {
     }
 
     fn draw_panels(&mut self, ctx: &egui::Context) {
-        let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let (esc_pressed, ctrl_k_pressed) = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::Escape),
+                (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::K),
+            )
+        });
+        if ctrl_k_pressed && !self.show_about {
+            if let AppScreen::Simulation(session) = &mut self.screen {
+                session.cmd_palette_open = !session.cmd_palette_open;
+                if session.cmd_palette_open {
+                    session.cmd_palette_just_opened = true;
+                    session.cmd_palette_cursor = 0;
+                }
+            }
+        }
         if self.show_about && esc_pressed {
             self.show_about = false;
-        } else if !ctx.wants_keyboard_input() {
-            if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
-                self.show_about = !self.show_about;
-            } else if !self.show_about {
-                if let AppScreen::Simulation(session) = &mut self.screen {
+        } else if let AppScreen::Simulation(session) = &mut self.screen {
+            if session.cmd_palette_open {
+                if esc_pressed {
+                    session.cmd_palette_open = false;
+                }
+            } else if !ctx.wants_keyboard_input() {
+                if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+                    self.show_about = !self.show_about;
+                } else if !self.show_about {
                     session.handle_global_hotkeys(ctx, esc_pressed);
                 }
             }
+        } else if !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+            self.show_about = !self.show_about;
         }
 
         let mut next_screen: Option<AppScreen> = None;
@@ -670,6 +696,11 @@ impl DomainSession {
             last_step_instant: Instant::now(),
             export_status: None,
             grand_epochs: Vec::new(),
+            initial_seed: seed,
+            cmd_palette_open: false,
+            cmd_palette_just_opened: false,
+            cmd_palette_query: String::new(),
+            cmd_palette_cursor: 0,
             wants_main_menu: false,
             wants_about: false,
         }
@@ -713,6 +744,11 @@ impl DomainSession {
             last_step_instant: Instant::now(),
             export_status: None,
             grand_epochs: Vec::new(),
+            initial_seed: seed,
+            cmd_palette_open: false,
+            cmd_palette_just_opened: false,
+            cmd_palette_query: String::new(),
+            cmd_palette_cursor: 0,
             wants_main_menu: false,
             wants_about: false,
         }
@@ -840,6 +876,315 @@ impl DomainSession {
         self.draw_right_inspector(ctx);
         self.draw_bottom_telemetry_plots(ctx);
         self.draw_central_viewport(ctx);
+        if self.cmd_palette_open {
+            self.draw_command_palette_modal(ctx);
+        }
+    }
+
+    fn run_or_get_epoch_digest(&mut self) -> crate::model::MultiEpochComparativeDigest {
+        if self.grand_epochs.is_empty() {
+            self.grand_epochs = self.world.run_continuous_grand_trajectory(10);
+        }
+        SimulationWorld::build_epoch_comparative_digest(
+            &self.grand_epochs,
+            self.initial_seed,
+            10,
+        )
+    }
+
+    fn draw_command_palette_modal(&mut self, ctx: &egui::Context) {
+        #[derive(Clone, Copy)]
+        enum ItmePaletteAction {
+            SwitchEpoch(GrandEpochStage),
+            SwitchRegime(RegimeId),
+            SwitchView(ViewportLayout),
+            TogglePlayPause,
+            StepTick,
+            ResetCamera,
+            ToggleAutoOrbit,
+            ToggleLabels,
+            ToggleMilestones,
+            RunGrandTrajectory,
+            ExportTelemetryCsv,
+            ExportEpochDigestJson,
+            ExportEpochDigestCsv,
+            ExportStageAtlasSvg,
+            ExportNewick,
+            ExportPhylogramSvg,
+            ReturnMainMenu,
+        }
+
+        fn fuzzy_score(query: &str, text: &str) -> Option<i32> {
+            let q = query.trim().to_ascii_lowercase();
+            if q.is_empty() {
+                return Some(100);
+            }
+            let t = text.to_ascii_lowercase();
+            if let Some(pos) = t.find(&q) {
+                return Some(250 - (pos as i32).min(120));
+            }
+            let mut score = 0i32;
+            let mut q_chars = q.chars().peekable();
+            let mut streak = 0i32;
+            for ch in t.chars() {
+                if let Some(&qc) = q_chars.peek() {
+                    if ch == qc {
+                        q_chars.next();
+                        streak += 1;
+                        score += 8 + streak * 4;
+                    } else {
+                        streak = 0;
+                    }
+                } else {
+                    break;
+                }
+            }
+            if q_chars.peek().is_none() {
+                Some(score)
+            } else {
+                None
+            }
+        }
+
+        let mut items: Vec<(i32, String, String, ItmePaletteAction)> = Vec::new();
+        for &ep in &GrandEpochStage::ALL {
+            let lbl = format!("Epoch: {} ({:.3} Ga)", ep.code(), ep.geologic_age_ga());
+            let hay = format!("epoch {} {:.3} ga biosphere trajectory", ep.code(), ep.geologic_age_ga());
+            if let Some(sc) = fuzzy_score(&self.cmd_palette_query, &hay) {
+                items.push((
+                    sc + 25,
+                    lbl,
+                    format!("Channels: {}/5", ep.active_heritable_channels()),
+                    ItmePaletteAction::SwitchEpoch(ep),
+                ));
+            }
+        }
+        for &reg in &RegimeId::ALL {
+            let title = if self.coupled_biosphere {
+                reg.full_title()
+            } else {
+                reg.domain_title(self.organism)
+            };
+            let hay = format!("regime {} {}", reg.code(), title);
+            if let Some(sc) = fuzzy_score(&self.cmd_palette_query, &hay) {
+                items.push((
+                    sc + 15,
+                    format!("Regime: {title}"),
+                    reg.code().to_string(),
+                    ItmePaletteAction::SwitchRegime(reg),
+                ));
+            }
+        }
+
+        let views_and_controls: [(&str, &str, &str, ItmePaletteAction); 16] = [
+            ("View 1: Spatial + Network", "Biosphere viewport", "view 1 spatial network phylogeny", ItmePaletteAction::SwitchView(ViewportLayout::SpatialAndPhylogeny)),
+            ("View 2: Spatial + 3D Structure", "Biosphere viewport", "view 2 spatial 3d structure", ItmePaletteAction::SwitchView(ViewportLayout::SpatialGridAnd3D)),
+            ("View 3: Full Lineage Phylogram", "Biosphere viewport", "view 3 full lineage phylogram", ItmePaletteAction::SwitchView(ViewportLayout::PhylogenyFull)),
+            ("View 4: 3D Structure Camera", "Biosphere viewport", "view 4 3d structure perspective", ItmePaletteAction::SwitchView(ViewportLayout::Perspective3D)),
+            ("View 5: 2D Blueprint", "Biosphere viewport", "view 5 2d blueprint", ItmePaletteAction::SwitchView(ViewportLayout::Blueprint2D)),
+            ("View 6: 4.25 Ga Timeline (Grand Trajectory)", "Coupled biosphere view", "view 6 4.25 ga timeline grand trajectory", ItmePaletteAction::SwitchView(ViewportLayout::GrandTrajectory)),
+            ("Control: Play / Pause Simulation (Space)", "Simulation control", "play pause toggle space", ItmePaletteAction::TogglePlayPause),
+            ("Control: Step +1 Tick (.)", "Simulation control", "step single tick period", ItmePaletteAction::StepTick),
+            ("Control: Reset 3D Camera (R)", "Simulation control", "reset camera 3d r", ItmePaletteAction::ResetCamera),
+            ("Control: Toggle Auto-Orbit Camera", "Simulation control", "auto orbit rotate camera", ItmePaletteAction::ToggleAutoOrbit),
+            ("Control: Toggle Viewport Labels", "Simulation control", "labels toggle show hide", ItmePaletteAction::ToggleLabels),
+            ("Control: Toggle Milestones Bar", "Simulation control", "milestones toggle bar", ItmePaletteAction::ToggleMilestones),
+            ("Run 4.25 Ga 8-Epoch Grand Trajectory", "Coupled biosphere simulation", "run grand trajectory 8 epoch", ItmePaletteAction::RunGrandTrajectory),
+            ("Export: Telemetry CSV (.csv)", "File export", "export telemetry csv", ItmePaletteAction::ExportTelemetryCsv),
+            ("Export: Multi-Epoch Habitability & Turnover JSON (.json)", "Comparative epoch summary", "export epoch habitability turnover summary json", ItmePaletteAction::ExportEpochDigestJson),
+            ("Export: Multi-Epoch Habitability & Turnover CSV (.csv)", "Comparative epoch summary", "export epoch habitability turnover summary csv", ItmePaletteAction::ExportEpochDigestCsv),
+        ];
+        for (lbl, sub, hay, act) in views_and_controls {
+            if let Some(sc) = fuzzy_score(&self.cmd_palette_query, hay) {
+                items.push((sc + 20, lbl.to_string(), sub.to_string(), act));
+            }
+        }
+        let extra_exports = [
+            ("Export: Stage Atlas SVG (.svg)", "File export", "export stage atlas svg", ItmePaletteAction::ExportStageAtlasSvg),
+            ("Export: Extended Newick (.nhx)", "File export", "export newick nhx", ItmePaletteAction::ExportNewick),
+            ("Export: Phylogram SVG (.svg)", "File export", "export phylogram svg", ItmePaletteAction::ExportPhylogramSvg),
+            ("Navigation: Return to Main Menu (Esc)", "Launcher", "main menu back home esc", ItmePaletteAction::ReturnMainMenu),
+        ];
+        for (lbl, sub, hay, act) in extra_exports {
+            if let Some(sc) = fuzzy_score(&self.cmd_palette_query, hay) {
+                items.push((sc + 10, lbl.to_string(), sub.to_string(), act));
+            }
+        }
+
+        items.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        if !items.is_empty() && self.cmd_palette_cursor >= items.len() {
+            self.cmd_palette_cursor = 0;
+        }
+
+        let (down_pressed, up_pressed, enter_pressed) = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::Enter),
+            )
+        });
+        if !items.is_empty() {
+            if down_pressed {
+                self.cmd_palette_cursor = (self.cmd_palette_cursor + 1) % items.len();
+            }
+            if up_pressed {
+                self.cmd_palette_cursor =
+                    (self.cmd_palette_cursor + items.len() - 1) % items.len();
+            }
+        }
+        let mut chosen = if enter_pressed {
+            items.get(self.cmd_palette_cursor).map(|x| x.3)
+        } else {
+            None
+        };
+
+        let mut open = self.cmd_palette_open;
+        egui::Window::new("Command Palette (Ctrl+K) — Epochs, Views, Controls & Exports")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(580.0)
+            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 56.0))
+            .show(ctx, |ui| {
+                let edit = ui.add(
+                    egui::TextEdit::singleline(&mut self.cmd_palette_query)
+                        .hint_text("Type epoch (E4, GOE, Gaia), view, control, or export...")
+                        .desired_width(f32::INFINITY),
+                );
+                if self.cmd_palette_just_opened {
+                    edit.request_focus();
+                    self.cmd_palette_just_opened = false;
+                }
+                if edit.changed() {
+                    self.cmd_palette_cursor = 0;
+                }
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("itme_cmd_palette_scroll")
+                    .max_height(340.0)
+                    .show(ui, |ui| {
+                        for (idx, (_, label, sub, act)) in items.iter().enumerate() {
+                            let selected = idx == self.cmd_palette_cursor;
+                            if ui
+                                .selectable_label(selected, format!("{label}   —   {sub}"))
+                                .clicked()
+                            {
+                                chosen = Some(*act);
+                            }
+                        }
+                        if items.is_empty() {
+                            ui.label("No matching epochs, regimes, views, or actions.");
+                        }
+                    });
+            });
+        self.cmd_palette_open = open;
+
+        if let Some(act) = chosen {
+            self.cmd_palette_open = false;
+            self.cmd_palette_query.clear();
+            let slug = if self.coupled_biosphere {
+                "planetary_biosphere"
+            } else {
+                self.organism.slug()
+            };
+            let step = self.world.step_count;
+            match act {
+                ItmePaletteAction::SwitchEpoch(ep) => {
+                    self.coupled_biosphere = true;
+                    let target_reg = match ep {
+                        GrandEpochStage::Epoch1HadeanHomochirality => RegimeId::R05Decaying,
+                        GrandEpochStage::Epoch2SgcAndRafProtocells => RegimeId::R10AdaptiveDissipation,
+                        GrandEpochStage::Epoch3RnaToDnaAndLuca => RegimeId::R15Replicative,
+                        GrandEpochStage::Epoch4GoeAndSymbiogenesis => RegimeId::R35Symbiogenetic,
+                        GrandEpochStage::Epoch5ClonalMulticellularity => RegimeId::R30FullyDarwinian,
+                        GrandEpochStage::Epoch6SuperorganismAgriculture => RegimeId::R30SoftInheritance,
+                        GrandEpochStage::Epoch7SymbolicExosomaticArchives => RegimeId::R30PseudoDarwinian,
+                        GrandEpochStage::Epoch8Gaia2PlanetaryHomeostasis => RegimeId::R30PseudoSoftInheritance,
+                    };
+                    if self.grand_epochs.is_empty() {
+                        self.grand_epochs = self.world.run_continuous_grand_trajectory(10);
+                    }
+                    self.jump_to_regime(target_reg);
+                    self.viewport_layout = ViewportLayout::GrandTrajectory;
+                    self.export_status = Some((
+                        format!("Switched to {} ({:.3} Ga) via Ctrl+K.", ep.code(), ep.geologic_age_ga()),
+                        false,
+                    ));
+                }
+                ItmePaletteAction::SwitchRegime(reg) => self.jump_to_regime(reg),
+                ItmePaletteAction::SwitchView(v) => {
+                    if v == ViewportLayout::GrandTrajectory {
+                        self.coupled_biosphere = true;
+                        if self.grand_epochs.is_empty() {
+                            self.grand_epochs = self.world.run_continuous_grand_trajectory(10);
+                        }
+                    }
+                    self.viewport_layout = v;
+                }
+                ItmePaletteAction::TogglePlayPause => {
+                    self.paused = !self.paused;
+                    self.last_step_instant = Instant::now();
+                }
+                ItmePaletteAction::StepTick => self.step_once(),
+                ItmePaletteAction::ResetCamera => self.camera = Camera3D::default(),
+                ItmePaletteAction::ToggleAutoOrbit => self.auto_rotate = !self.auto_rotate,
+                ItmePaletteAction::ToggleLabels => self.show_labels = !self.show_labels,
+                ItmePaletteAction::ToggleMilestones => self.show_milestones = !self.show_milestones,
+                ItmePaletteAction::RunGrandTrajectory => {
+                    self.coupled_biosphere = true;
+                    self.grand_epochs = self.world.run_continuous_grand_trajectory(10);
+                    self.viewport_layout = ViewportLayout::GrandTrajectory;
+                }
+                ItmePaletteAction::ExportTelemetryCsv => {
+                    let csv_data = if self.coupled_biosphere
+                        && !self.grand_epochs.is_empty()
+                        && self.viewport_layout == ViewportLayout::GrandTrajectory
+                    {
+                        SimulationWorld::export_grand_trajectory_csv(&self.grand_epochs)
+                    } else {
+                        self.world.export_history_csv()
+                    };
+                    let fname = format!("itme_{slug}_step{step}.csv");
+                    self.save_text_with_dialog(&fname, "CSV Telemetry", "csv", &csv_data);
+                }
+                ItmePaletteAction::ExportEpochDigestJson => {
+                    let digest = self.run_or_get_epoch_digest();
+                    let json = SimulationWorld::export_epoch_comparative_json(&digest);
+                    self.save_text_with_dialog(
+                        "itme_epoch_habitability_turnover.json",
+                        "Epoch Comparative JSON",
+                        "json",
+                        &json,
+                    );
+                }
+                ItmePaletteAction::ExportEpochDigestCsv => {
+                    let digest = self.run_or_get_epoch_digest();
+                    let csv = SimulationWorld::export_epoch_comparative_csv(&digest);
+                    self.save_text_with_dialog(
+                        "itme_epoch_habitability_turnover.csv",
+                        "Epoch Comparative CSV",
+                        "csv",
+                        &csv,
+                    );
+                }
+                ItmePaletteAction::ExportStageAtlasSvg => {
+                    let atlas_svg = self.world.build_stage_atlas_svg();
+                    let fname = format!("itme_{slug}_stage_atlas.svg");
+                    self.save_text_with_dialog(&fname, "SVG Vector Graphics", "svg", &atlas_svg);
+                }
+                ItmePaletteAction::ExportNewick => {
+                    let nhx = self.world.export_newick(true);
+                    let fname = format!("itme_{slug}_step{step}.nhx");
+                    self.save_text_with_dialog(&fname, "Extended Newick", "nhx", &nhx);
+                }
+                ItmePaletteAction::ExportPhylogramSvg => {
+                    let phylo_svg = self.world.export_phylogram_svg();
+                    let fname = format!("itme_{slug}_step{step}_phylogram.svg");
+                    self.save_text_with_dialog(&fname, "SVG Phylogram", "svg", &phylo_svg);
+                }
+                ItmePaletteAction::ReturnMainMenu => self.wants_main_menu = true,
+            }
+        }
     }
 
     fn draw_top_toolbar(&mut self, ctx: &egui::Context) {
@@ -937,6 +1282,37 @@ impl DomainSession {
                         self.save_text_with_dialog(&fname, "SVG Phylogram", "svg", &phylo_svg);
                         ui.close_menu();
                     }
+                    ui.separator();
+                    if ui
+                        .button("Epoch Habitability & Turnover JSON (.json)")
+                        .on_hover_text("Export 8-epoch planetary habitability & biodiversity turnover comparative summary to JSON.")
+                        .clicked()
+                    {
+                        let digest = self.run_or_get_epoch_digest();
+                        let json = SimulationWorld::export_epoch_comparative_json(&digest);
+                        self.save_text_with_dialog(
+                            "itme_epoch_habitability_turnover.json",
+                            "Epoch Comparative JSON",
+                            "json",
+                            &json,
+                        );
+                        ui.close_menu();
+                    }
+                    if ui
+                        .button("Epoch Habitability & Turnover CSV (.csv)")
+                        .on_hover_text("Export 8-epoch planetary habitability & biodiversity turnover comparative summary to CSV.")
+                        .clicked()
+                    {
+                        let digest = self.run_or_get_epoch_digest();
+                        let csv = SimulationWorld::export_epoch_comparative_csv(&digest);
+                        self.save_text_with_dialog(
+                            "itme_epoch_habitability_turnover.csv",
+                            "Epoch Comparative CSV",
+                            "csv",
+                            &csv,
+                        );
+                        ui.close_menu();
+                    }
                 });
                 export_resp
                     .response
@@ -1008,6 +1384,17 @@ impl DomainSession {
                         .small()
                         .color(egui::Color32::from_rgb(168, 184, 208)),
                 );
+                if ui
+                    .button("Cmd Palette (Ctrl+K)")
+                    .on_hover_text("Open fuzzy command palette for epochs, biosphere views, controls & exports (Ctrl+K)")
+                    .clicked()
+                {
+                    self.cmd_palette_open = !self.cmd_palette_open;
+                    if self.cmd_palette_open {
+                        self.cmd_palette_just_opened = true;
+                        self.cmd_palette_cursor = 0;
+                    }
+                }
                 if ui
                     .button("About")
                     .on_hover_text("About ITME & CRV Science Network (F1)")
@@ -2522,7 +2909,9 @@ impl DomainSession {
             return;
         }
 
-        let last = self.grand_epochs.last().unwrap();
+        let Some(last) = self.grand_epochs.last() else {
+            return;
+        };
         painter.text(
             panel_rect.left_top() + egui::vec2(12.0, 9.0),
             egui::Align2::LEFT_TOP,

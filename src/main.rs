@@ -14,6 +14,7 @@
 // along with this program.  If not, see <https://gnu.org>.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![deny(unsafe_code)]
 
 //! Unified CLI + Native GUI entrypoint for the ITME v23.0 (`v2.3.0`) Rust Simulation.
 
@@ -24,6 +25,7 @@ use std::env;
 use std::process;
 
 #[cfg(windows)]
+#[allow(unsafe_code)]
 fn attach_parent_console_if_cli() {
     if env::args_os().len() > 1 {
         extern "system" {
@@ -66,6 +68,8 @@ OPTIONS:
     --seed <U64>                  Deterministic Xoshiro256** PRNG seed [default: 20250813]
     --no-ascii-3d                 Omit inline 3D ASCII & spatial map projections in console output
     --export-csv <FILE>           Export step-by-step ITME v2.3.0 telemetry table to CSV
+    --export-epoch-summary-json <FILE>  Export 8-epoch habitability & biodiversity turnover comparative JSON
+    --export-epoch-summary-csv <FILE>   Export 8-epoch habitability & biodiversity turnover comparative CSV
     --export-svg <FILE>           Export 3D/2D projected structural stage atlas to SVG
     --export-newick <FILE>        Export Extended Newick (eNewick #H + MRO/APICO/KLEPTO NHX) networks
     --export-phylo-svg <FILE>     Export anastomosing SVG phylogram (Mito->Hydro, Hydro->MitoS & MRO->0)
@@ -170,6 +174,22 @@ fn main() {
                     process::exit(2);
                 };
                 opts.csv_path = Some(val.clone());
+            }
+            "--export-epoch-summary-json" => {
+                i += 1;
+                let Some(val) = args.get(i) else {
+                    eprintln!("Error: --export-epoch-summary-json requires a file path.");
+                    process::exit(2);
+                };
+                opts.epoch_summary_json_path = Some(val.clone());
+            }
+            "--export-epoch-summary-csv" => {
+                i += 1;
+                let Some(val) = args.get(i) else {
+                    eprintln!("Error: --export-epoch-summary-csv requires a file path.");
+                    process::exit(2);
+                };
+                opts.epoch_summary_csv_path = Some(val.clone());
             }
             "--export-svg" => {
                 i += 1;

@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://gnu.org>.
 
+#![forbid(unsafe_code)]
+
 //! Information-Theoretic Model of Evolution (ITME v23.0 / `v2.3.0`)
 //! **Continuous 4.25-Billion-Year Multi-Epoch Grand Trajectory Engine**:
 //! Unbroken simulation chaining `Epoch 1: Homochirality & Minihelix L-AA` -> `Epoch 2: 20-AA SGC & RAF Protocells` ->
@@ -191,5 +193,31 @@ mod tests {
             false,
         );
         assert_eq!(regime, RegimeId::R15Replicative);
+    }
+
+    #[test]
+    fn unit_test_multi_epoch_habitability_and_turnover_comparative_export() {
+        let digest = crate::engine::SimulationWorld::run_multi_epoch_comparative_digest(8, 20250813);
+        assert_eq!(digest.epoch_count, 8);
+        assert_eq!(digest.epochs.len(), 8);
+        assert!(digest.mean_habitability_index > 0.0 && digest.mean_habitability_index <= 1.0);
+        assert!(digest.cumulative_o2_rise_pal > 0.25, "expected GOE O2 rise across epochs");
+        assert!(digest.total_mi_gain_bits > 0.0, "expected net mutual info gain");
+        assert!(digest.peak_habitability_epoch.is_some());
+
+        let json = crate::engine::SimulationWorld::export_epoch_comparative_json(&digest);
+        assert!(json.contains("\"epoch_count\": 8"));
+        assert!(json.contains("\"habitability_index\""));
+        assert!(json.contains("\"biodiversity_turnover_index\""));
+
+        let csv = crate::engine::SimulationWorld::export_epoch_comparative_csv(&digest);
+        assert_eq!(csv.lines().count(), 9, "header + 8 epoch rows");
+
+        // Edge case: empty trajectory slice must return safe zeroed digest without panicking
+        let empty = crate::engine::SimulationWorld::build_epoch_comparative_digest(&[], 42, 8);
+        assert_eq!(empty.epoch_count, 0);
+        assert!(empty.peak_habitability_epoch.is_none());
+        let empty_csv = crate::engine::SimulationWorld::export_epoch_comparative_csv(&empty);
+        assert_eq!(empty_csv.lines().count(), 1);
     }
 }

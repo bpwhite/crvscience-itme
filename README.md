@@ -2,7 +2,7 @@
 
 ![ITME Headless Workbench](validation/headless_screenshot.png)
 
-Native Rust simulation unifying **24 evolutionary milestones** into a single unbroken **8-Epoch Continuous Trajectory (`4.25 Ga -> Gaia 2.0`)** on one persistent `SimulationWorld` and one reticulate `PhylogenyTracker`:
+Native Rust (`#![forbid(unsafe_code)]` library, `#![deny(unsafe_code)]` binary outside scoped Win32 `AttachConsole`) simulation unifying **24 evolutionary milestones** into a single unbroken **8-Epoch Continuous Trajectory (`4.25 Ga -> Gaia 2.0`)** on one persistent `SimulationWorld` and one reticulate `PhylogenyTracker`:
 1. **Epoch 1 (`~4.25 Ga`) — Magnetite `CISS` Homochirality & Minihelix `L-Aminoacylation`** ([Ozturk et al., 2023](https://pmc.ncbi.nlm.nih.gov/articles/PMC10246896/); [Tamura & Schimmel, 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC1564265/))
 2. **Epoch 2 (`~4.18 Ga`) — Collective `20-AA SGC` Crystallization & `RAF` Protocells** ([Vetsigian et al., 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC1502294/); [Damer & Deamer, 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7133448/); [Hordijk et al., 2018](https://pmc.ncbi.nlm.nih.gov/articles/PMC6315399/))
 3. **Epoch 3 (`~4.05 Ga`) — `RNR` `RNA -> T-DNA`, `ThyX/UDG` Repair, Virosphere & `LUCA`** ([Lundin et al., 2015](https://pmc.ncbi.nlm.nih.gov/articles/PMC4390871/); [Sousa et al., 2009](https://pmc.ncbi.nlm.nih.gov/articles/PMC2660913/); [Forterre, 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC1450140/))
@@ -21,7 +21,7 @@ Native Rust simulation unifying **24 evolutionary milestones** into a single unb
 cargo run --release                                                                                       # Interactive Live Multi-Epoch GUI
 cargo run --release -- --headless --grand-trajectory --export-newick grand.nhx --export-phylo-svg grand.svg # Continuous 8-Epoch Grand Benchmark
 cargo check --no-default-features --all-targets                                                           # Verify Headless Build Without GUI Deps
-cargo test --all-targets                                                                                  # Run Unit, Geometry, Validation & 24 Regime Suites
+cargo test --all-targets --release                                                                        # Run all 45 Unit, Geometry, Validation & 24 Regime Suites
 ```
 
 ## GUI Controls & Hotkeys
@@ -30,6 +30,7 @@ Global keyboard shortcuts are guarded by `!ctx.wants_keyboard_input()` so text i
 
 | Shortcut / Control | Action |
 | --- | --- |
+| `Ctrl+K` | Open fuzzy Command Palette across epochs, regimes, biosphere views, simulation controls, and exports |
 | `Space` | Play / Pause live simulation |
 | `.` (Period) | Advance simulation by one discrete tick |
 | `R` | Reset 3D camera (`Camera3D::default()`) |
@@ -37,7 +38,7 @@ Global keyboard shortcuts are guarded by `!ctx.wants_keyboard_input()` so text i
 | `6` | Switch to `4.25 Ga Timeline` (available in coupled `PlanetaryBiosphere` mode) |
 | `F1` / `Esc` | Toggle `About ITME` modal (`F1`); close modal or return to Main Menu (`Esc`) |
 | **Mouse Drag / Scroll** | Orbit 3D structure camera (`yaw`/`pitch`) and zoom (`0.45x..2.8x`) |
-| **`Export...` Dropdown** | Consolidated menu for Telemetry `.csv`, Stage Atlas `.svg`, Extended Newick `.nhx`, and Phylogram `.svg` |
+| **`Export...` Dropdown** | Consolidated menu for Telemetry `.csv`, Multi-Epoch Habitability & Turnover `.json`/`.csv`, Stage Atlas `.svg`, Extended Newick `.nhx`, and Phylogram `.svg` |
 | **`Milestones [-/+]`** | Collapsible toggle hiding/showing domain milestone pulse buttons to maximize canvas area |
 | **Telemetry Crosshair** | Hover bottom plots to inspect synchronized `Ga`, tick `step`, cursor `Y`, and series values (`O2 (PAL Index)`, `N/P`, `Order O`, domain curves) |
 
@@ -56,6 +57,8 @@ Global keyboard shortcuts are guarded by `!ctx.wants_keyboard_input()` so text i
 | `--seed <U64>` | Deterministic Xoshiro256** PRNG seed | `20250813` |
 | `--no-ascii-3d` | Omit inline 3D ASCII & spatial map projections in console output | Show ASCII |
 | `--export-csv <FILE>` | Export step-by-step telemetry or grand trajectory CSV | None |
+| `--export-epoch-summary-json <FILE>` | Export 8-epoch planetary habitability & biodiversity turnover comparative JSON | None |
+| `--export-epoch-summary-csv <FILE>` | Export 8-epoch planetary habitability & biodiversity turnover comparative CSV | None |
 | `--export-svg <FILE>` | Export 13-regime 3D/2D structural stage atlas SVG | None |
 | `--export-newick <FILE>` | Export Extended Newick (`eNewick #H` + `MRO/APICO/KLEPTO` NHX) | None |
 | `--export-phylo-svg <FILE>` | Export anastomosing SVG phylogram | None |

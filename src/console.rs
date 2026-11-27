@@ -34,6 +34,8 @@ pub struct ConsoleOptions {
     pub seed: u64,
     pub show_ascii_3d: bool,
     pub csv_path: Option<String>,
+    pub epoch_summary_json_path: Option<String>,
+    pub epoch_summary_csv_path: Option<String>,
     pub svg_path: Option<String>,
     pub newick_path: Option<String>,
     pub phylo_svg_path: Option<String>,
@@ -49,6 +51,8 @@ impl Default for ConsoleOptions {
             seed: 20250813,
             show_ascii_3d: true,
             csv_path: None,
+            epoch_summary_json_path: None,
+            epoch_summary_csv_path: None,
             svg_path: None,
             newick_path: None,
             phylo_svg_path: None,
@@ -92,6 +96,21 @@ pub fn run_grand_trajectory_headless(opts: &ConsoleOptions) -> io::Result<()> {
     if let Some(ref cp) = opts.csv_path {
         write_file_creating_dirs(cp, &csv_out)?;
         println!("[Export] Wrote ITME v23.0 (v2.3.0) grand trajectory CSV to: {cp}");
+    }
+    if opts.epoch_summary_json_path.is_some() || opts.epoch_summary_csv_path.is_some() {
+        let digest = SimulationWorld::build_epoch_comparative_digest(
+            &summaries,
+            opts.seed,
+            opts.steps_per_regime.max(12),
+        );
+        if let Some(ref jp) = opts.epoch_summary_json_path {
+            write_file_creating_dirs(jp, &SimulationWorld::export_epoch_comparative_json(&digest))?;
+            println!("[Export] Wrote ITME v23.0 multi-epoch habitability & turnover JSON to: {jp}");
+        }
+        if let Some(ref cp) = opts.epoch_summary_csv_path {
+            write_file_creating_dirs(cp, &SimulationWorld::export_epoch_comparative_csv(&digest))?;
+            println!("[Export] Wrote ITME v23.0 multi-epoch habitability & turnover CSV to: {cp}");
+        }
     }
     if let Some(ref sp) = opts.svg_path {
         write_file_creating_dirs(sp, &world.build_stage_atlas_svg())?;
@@ -334,6 +353,25 @@ pub fn run_headless(opts: &ConsoleOptions) -> io::Result<()> {
             "[Export] Wrote anastomosing SVG phylogram (Mito->Hydro, Hydro->MitoS, MRO->0 & Holo->Apico) to: {}",
             path
         );
+    }
+
+    if opts.epoch_summary_json_path.is_some() || opts.epoch_summary_csv_path.is_some() {
+        let digest = SimulationWorld::run_multi_epoch_comparative_digest(
+            opts.steps_per_regime.max(12),
+            opts.seed,
+        );
+        if let Some(ref path) = opts.epoch_summary_json_path {
+            write_file_creating_dirs(path, &SimulationWorld::export_epoch_comparative_json(&digest))?;
+            println!(
+                "[Export] Wrote ITME v23.0 multi-epoch habitability & turnover JSON to: {path}"
+            );
+        }
+        if let Some(ref path) = opts.epoch_summary_csv_path {
+            write_file_creating_dirs(path, &SimulationWorld::export_epoch_comparative_csv(&digest))?;
+            println!(
+                "[Export] Wrote ITME v23.0 multi-epoch habitability & turnover CSV to: {path}"
+            );
+        }
     }
 
     println!("\nHeadless ITME v23.0 (v2.3.0) anaerobic MRO, apicoplast & symbiogenesis simulation completed.");

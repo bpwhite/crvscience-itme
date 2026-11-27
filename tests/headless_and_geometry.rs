@@ -68,6 +68,7 @@ fn headless_and_grand_trajectory_export_valid_telemetry() {
         newick_path: Some(newick_path.to_string_lossy().into_owned()),
         phylo_svg_path: Some(phylo_svg_path.to_string_lossy().into_owned()),
         grand_trajectory: false,
+        ..ConsoleOptions::default()
     };
     run_headless(&opts).expect("run_headless should succeed");
 

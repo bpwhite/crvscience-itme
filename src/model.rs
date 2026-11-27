@@ -1294,6 +1294,41 @@ pub struct GrandTrajectoryEpochSummary {
     pub landmark_summary: String,
 }
 
+/// Per-epoch comparative planetary habitability & biodiversity turnover summary.
+#[derive(Clone, Debug)]
+pub struct EpochHabitabilityTurnoverSummary {
+    pub epoch_code: String,
+    pub geologic_age_ga: f64,
+    pub tick_end: usize,
+    pub population_size: usize,
+    pub heritable_channels_active: u8,
+    pub heritable_mutual_info_bits: f64,
+    pub informational_leverage_li: f64,
+    pub order_velocity_vo: f64,
+    pub planetary_o2_pal: f64,
+    pub planetary_co2_ppm: f64,
+    pub planetary_exergy_budget: f64,
+    pub habitability_index: f64,
+    pub biodiversity_turnover_index: f64,
+    pub delta_o2_vs_prev: f64,
+    pub delta_mi_vs_prev: f64,
+    pub landmark_summary: String,
+}
+
+/// Multi-epoch comparative habitability & biodiversity turnover digest across the 4.25 Ga trajectory.
+#[derive(Clone, Debug)]
+pub struct MultiEpochComparativeDigest {
+    pub seed: u64,
+    pub ticks_per_epoch: usize,
+    pub epoch_count: usize,
+    pub mean_habitability_index: f64,
+    pub peak_habitability_epoch: Option<String>,
+    pub cumulative_o2_rise_pal: f64,
+    pub mean_turnover_index: f64,
+    pub total_mi_gain_bits: f64,
+    pub epochs: Vec<EpochHabitabilityTurnoverSummary>,
+}
+
 /// Emergent ecological & individuality guild determined by sequence motifs, mixotrophic kleptoplasty,
 /// primary/secondary/tertiary endosymbiotic organelle fixation, anaerobic MRO reduction, and secondary
 /// reductive evolution of photosynthetic holobionts into parasitic apicoplast-bearing lineages.

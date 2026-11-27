@@ -22,9 +22,10 @@ use crate::geometry::{build_structure_scene, render_stage_atlas_svg, StructureSc
 use crate::model::{
     compute_critical_fidelity, compute_food_web_entropy, compute_heritable_mutual_info,
     compute_thermodynamic_hazard, AbiogenesisStage, AgricultureState, ChiralCodeReactor,
-    ChiralityCodeStage, CulturalState, EnvironmentControls, EusocialState, ExosomaticState,
-    GenomeSubstrateStage, GrandEpochStage, GrandTrajectoryEpochSummary, HadeanGeochemicalBath,
-    ItmeMetrics, MachineSynthesisState, MroClass, MulticellularState, OrderPhase,
+    ChiralityCodeStage, CulturalState, EnvironmentControls, EpochHabitabilityTurnoverSummary,
+    EusocialState, ExosomaticState, GenomeSubstrateStage, GrandEpochStage,
+    GrandTrajectoryEpochSummary, HadeanGeochemicalBath, ItmeMetrics, MachineSynthesisState,
+    MroClass, MultiEpochComparativeDigest, MulticellularState, OrderPhase,
     PlanetaryBiosphere, PlanetaryState, PriceDecomposition, RnrVirosphereReactor, Rng,
     TelemetryWindow, TrophicGuild,
 };
@@ -4878,5 +4879,255 @@ impl SimulationWorld {
             format!("ITME v23.0 {} — 13-Regime Stage Atlas", self.organism.title())
         };
         render_stage_atlas_svg(&title, &panels)
+    }
+
+    fn json_escape_itme(raw: &str) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::with_capacity(raw.len() + 8);
+        for ch in raw.chars() {
+            match ch {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if (c as u32) < 0x20 || c.is_control() => {
+                    let _ = write!(out, "\\u{:04x}", c as u32);
+                }
+                c => out.push(c),
+            }
+        }
+        out
+    }
+
+    /// Build a comparative planetary habitability & biodiversity turnover digest from an 8-epoch trajectory.
+    pub fn build_epoch_comparative_digest(
+        epochs: &[GrandTrajectoryEpochSummary],
+        seed: u64,
+        ticks_per_epoch: usize,
+    ) -> MultiEpochComparativeDigest {
+        if epochs.is_empty() {
+            return MultiEpochComparativeDigest {
+                seed,
+                ticks_per_epoch,
+                epoch_count: 0,
+                mean_habitability_index: 0.0,
+                peak_habitability_epoch: None,
+                cumulative_o2_rise_pal: 0.0,
+                mean_turnover_index: 0.0,
+                total_mi_gain_bits: 0.0,
+                epochs: Vec::new(),
+            };
+        }
+
+        let mut rows = Vec::with_capacity(epochs.len());
+        let mut sum_hab = 0.0_f64;
+        let mut sum_turn = 0.0_f64;
+        let mut best_hab = -1.0_f64;
+        let mut peak_epoch: Option<String> = None;
+
+        for (idx, s) in epochs.iter().enumerate() {
+            let o2_score = (s.planetary_o2 / 0.94).clamp(0.0, 1.0);
+            let co2_score = (1.0 - ((s.planetary_co2_ppm - 280.0).abs() / 1200.0)).clamp(0.05, 1.0);
+            let exergy_score = (s.planetary_exergy_budget / 2.2).clamp(0.0, 1.0);
+            let order_score = (0.5 + 0.5 * s.order_velocity_vo.clamp(-1.0, 1.0)).clamp(0.0, 1.0);
+            let habitability_index =
+                (0.32 * o2_score + 0.23 * co2_score + 0.25 * exergy_score + 0.20 * order_score)
+                    .clamp(0.0, 1.0);
+
+            let (delta_o2, delta_mi, turnover) = if idx == 0 {
+                let chan_frac = f64::from(s.heritable_channels_active) / 5.0;
+                (0.0, 0.0, (0.15 + 0.35 * chan_frac).clamp(0.0, 1.0))
+            } else {
+                let prev = &epochs[idx - 1];
+                let d_o2 = s.planetary_o2 - prev.planetary_o2;
+                let d_mi = s.heritable_mutual_info_bits - prev.heritable_mutual_info_bits;
+                let pop_prev = (prev.population_size.max(1)) as f64;
+                let pop_shift = ((s.population_size as f64) - pop_prev).abs() / pop_prev;
+                let chan_jump =
+                    f64::from(s.heritable_channels_active.saturating_sub(prev.heritable_channels_active))
+                        * 0.22;
+                let mi_rel = (d_mi.abs() / prev.heritable_mutual_info_bits.max(10.0)).clamp(0.0, 1.0);
+                let t = (0.35 * pop_shift + 0.35 * mi_rel + chan_jump + 0.15 * d_o2.abs())
+                    .clamp(0.0, 1.0);
+                (d_o2, d_mi, t)
+            };
+
+            sum_hab += habitability_index;
+            sum_turn += turnover;
+            if habitability_index > best_hab {
+                best_hab = habitability_index;
+                peak_epoch = Some(s.epoch.code().to_string());
+            }
+
+            rows.push(EpochHabitabilityTurnoverSummary {
+                epoch_code: s.epoch.code().to_string(),
+                geologic_age_ga: s.geologic_age_ga,
+                tick_end: s.tick_end,
+                population_size: s.population_size,
+                heritable_channels_active: s.heritable_channels_active,
+                heritable_mutual_info_bits: s.heritable_mutual_info_bits,
+                informational_leverage_li: s.informational_leverage_li,
+                order_velocity_vo: s.order_velocity_vo,
+                planetary_o2_pal: s.planetary_o2,
+                planetary_co2_ppm: s.planetary_co2_ppm,
+                planetary_exergy_budget: s.planetary_exergy_budget,
+                habitability_index,
+                biodiversity_turnover_index: turnover,
+                delta_o2_vs_prev: delta_o2,
+                delta_mi_vs_prev: delta_mi,
+                landmark_summary: s.landmark_summary.clone(),
+            });
+        }
+
+        let n_f = rows.len() as f64;
+        let first = &epochs[0];
+        let last = &epochs[epochs.len() - 1];
+        MultiEpochComparativeDigest {
+            seed,
+            ticks_per_epoch,
+            epoch_count: rows.len(),
+            mean_habitability_index: sum_hab / n_f,
+            peak_habitability_epoch: peak_epoch,
+            cumulative_o2_rise_pal: last.planetary_o2 - first.planetary_o2,
+            mean_turnover_index: sum_turn / n_f,
+            total_mi_gain_bits: last.heritable_mutual_info_bits - first.heritable_mutual_info_bits,
+            epochs: rows,
+        }
+    }
+
+    /// Execute the 8-epoch 4.25 Ga trajectory and return its comparative habitability & turnover digest.
+    pub fn run_multi_epoch_comparative_digest(
+        ticks_per_epoch: usize,
+        seed: u64,
+    ) -> MultiEpochComparativeDigest {
+        let mut world = Self::new(
+            OrganismKind::ArtificialIntelligence,
+            RegimeId::R35Symbiogenetic,
+            SimulationMode::OrganicSandbox,
+            ticks_per_epoch.max(4),
+            seed,
+        );
+        let epochs = world.run_continuous_grand_trajectory(ticks_per_epoch.max(4));
+        Self::build_epoch_comparative_digest(&epochs, seed, ticks_per_epoch.max(4))
+    }
+
+    /// Export a `MultiEpochComparativeDigest` to RFC 8259 JSON.
+    pub fn export_epoch_comparative_json(digest: &MultiEpochComparativeDigest) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::with_capacity(2048);
+        out.push_str("{\n");
+        let _ = writeln!(out, "  \"seed\": {},", digest.seed);
+        let _ = writeln!(out, "  \"ticks_per_epoch\": {},", digest.ticks_per_epoch);
+        let _ = writeln!(out, "  \"epoch_count\": {},", digest.epoch_count);
+        let _ = writeln!(
+            out,
+            "  \"mean_habitability_index\": {:.4},",
+            digest.mean_habitability_index
+        );
+        let peak_str = digest
+            .peak_habitability_epoch
+            .as_deref()
+            .map(|s| format!("\"{}\"", Self::json_escape_itme(s)))
+            .unwrap_or_else(|| "null".to_string());
+        let _ = writeln!(out, "  \"peak_habitability_epoch\": {peak_str},");
+        let _ = writeln!(
+            out,
+            "  \"cumulative_o2_rise_pal\": {:.4},",
+            digest.cumulative_o2_rise_pal
+        );
+        let _ = writeln!(
+            out,
+            "  \"mean_turnover_index\": {:.4},",
+            digest.mean_turnover_index
+        );
+        let _ = writeln!(
+            out,
+            "  \"total_mi_gain_bits\": {:.3},",
+            digest.total_mi_gain_bits
+        );
+        out.push_str("  \"epochs\": [\n");
+        for (idx, e) in digest.epochs.iter().enumerate() {
+            let comma = if idx + 1 < digest.epochs.len() { "," } else { "" };
+            out.push_str("    {\n");
+            let _ = writeln!(
+                out,
+                "      \"epoch_code\": \"{}\",",
+                Self::json_escape_itme(&e.epoch_code)
+            );
+            let _ = writeln!(out, "      \"geologic_age_ga\": {:.4},", e.geologic_age_ga);
+            let _ = writeln!(out, "      \"tick_end\": {},", e.tick_end);
+            let _ = writeln!(out, "      \"population_size\": {},", e.population_size);
+            let _ = writeln!(
+                out,
+                "      \"heritable_channels_active\": {},",
+                e.heritable_channels_active
+            );
+            let _ = writeln!(
+                out,
+                "      \"heritable_mutual_info_bits\": {:.3},",
+                e.heritable_mutual_info_bits
+            );
+            let _ = writeln!(
+                out,
+                "      \"informational_leverage_li\": {:.4},",
+                e.informational_leverage_li
+            );
+            let _ = writeln!(out, "      \"order_velocity_vo\": {:.4},", e.order_velocity_vo);
+            let _ = writeln!(out, "      \"planetary_o2_pal\": {:.4},", e.planetary_o2_pal);
+            let _ = writeln!(out, "      \"planetary_co2_ppm\": {:.1},", e.planetary_co2_ppm);
+            let _ = writeln!(
+                out,
+                "      \"planetary_exergy_budget\": {:.4},",
+                e.planetary_exergy_budget
+            );
+            let _ = writeln!(out, "      \"habitability_index\": {:.4},", e.habitability_index);
+            let _ = writeln!(
+                out,
+                "      \"biodiversity_turnover_index\": {:.4},",
+                e.biodiversity_turnover_index
+            );
+            let _ = writeln!(out, "      \"delta_o2_vs_prev\": {:+.4},", e.delta_o2_vs_prev);
+            let _ = writeln!(out, "      \"delta_mi_vs_prev\": {:+.3},", e.delta_mi_vs_prev);
+            let _ = writeln!(
+                out,
+                "      \"landmark_summary\": \"{}\"",
+                Self::json_escape_itme(&e.landmark_summary)
+            );
+            let _ = writeln!(out, "    }}{comma}");
+        }
+        out.push_str("  ]\n}\n");
+        out
+    }
+
+    /// Export a `MultiEpochComparativeDigest` to RFC 4180 CSV.
+    pub fn export_epoch_comparative_csv(digest: &MultiEpochComparativeDigest) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::from(
+            "epoch_code,geologic_age_ga,tick_end,population_size,heritable_channels_active,heritable_mutual_info_bits,informational_leverage_li,order_velocity_vo,planetary_o2_pal,planetary_co2_ppm,planetary_exergy_budget,habitability_index,biodiversity_turnover_index,delta_o2_vs_prev,delta_mi_vs_prev,landmark_summary\n",
+        );
+        for e in &digest.epochs {
+            let _ = writeln!(
+                out,
+                "{},{:.4},{},{},{},{:.3},{:.4},{:.4},{:.4},{:.1},{:.4},{:.4},{:.4},{:+.4},{:+.3},{}",
+                Self::csv_escape(&e.epoch_code),
+                e.geologic_age_ga,
+                e.tick_end,
+                e.population_size,
+                e.heritable_channels_active,
+                e.heritable_mutual_info_bits,
+                e.informational_leverage_li,
+                e.order_velocity_vo,
+                e.planetary_o2_pal,
+                e.planetary_co2_ppm,
+                e.planetary_exergy_budget,
+                e.habitability_index,
+                e.biodiversity_turnover_index,
+                e.delta_o2_vs_prev,
+                e.delta_mi_vs_prev,
+                Self::csv_escape(&e.landmark_summary),
+            );
+        }
+        out
     }
 }
